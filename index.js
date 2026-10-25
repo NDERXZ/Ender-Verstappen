@@ -1470,8 +1470,7 @@ Cantarella.ev.on('group-participants.update', async (_gpUpdate) => {
             if (!global._LOGGER_TICKER) _L.startTicker();
             try {
                 const _ab = require('./lib/system/antibot');
-                const _abOwnerJid = ((Array.isArray(global.owner)?global.owner[0]:global.owner)||'').replace(/[^0-9]/g,'') + '@s.whatsapp.net';
-                _ab.init(async (msg) => { try { await Cantarella.sendMessage(_abOwnerJid, { text: msg }); } catch {} });
+                _ab.init(null);
                 global._ANTIBOT = _ab;
             } catch(e) { console.warn('[AntiBot] Init skip:', e.message); }
             if (_AB) {
