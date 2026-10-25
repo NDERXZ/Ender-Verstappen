@@ -31952,11 +31952,14 @@ else if (command === 'setmc' || command === 'setmcserver') {
       `Panel URL: *${_cur.pteroPanelUrl || 'Belum diatur'}*\n` +
       `Client API Key: *${_cur.pteroApiKey ? (_cur.pteroApiKey.slice(0, 12) + '...') : 'Belum diatur'}*\n` +
       `Server ID: *${_cur.pteroServerId || 'Auto-Detect'}*\n` +
-      `Host IP:Port: *${_cur.host ? (_cur.host + ':' + _cur.port) : 'Auto dari Panel'}*\n\n` +
+      `Host IP:Port: *${_cur.host ? (_cur.host + ':' + _cur.port) : 'Auto dari Panel'}*\n` +
+      `Versi (ViaVersion): *${_cur.version || '1.8.x - 1.21.x'}*\n\n` +
       `*Cara Mengatur via Pterodactyl API (Rekomendasi):*\n` +
       `*${prefix}setmc https://panel.domainmu.com*\n` +
       `atau jika ingin mengganti API Key juga:\n` +
       `*${prefix}setmc https://panel.domainmu.com ptlc_xxxx [server_id]*\n\n` +
+      `*Cara Mengatur Versi ViaVersion:*\n` +
+      `*${prefix}setmc version 1.8.x - 1.21.x*\n\n` +
       `*Cara Mengatur via IP / RCON:*\n` +
       `*${prefix}setmc play.evertalemc.id:25565 [rcon_port] [rcon_pass]*`
     );
@@ -31965,6 +31968,13 @@ else if (command === 'setmc' || command === 'setmcserver') {
   const _first = _parts[0] || '';
   const _second = _parts[1] || '';
   const _third = _parts[2] || '';
+
+  if (_first.toLowerCase() === 'version' || _first.toLowerCase() === 'ver') {
+    const _newVer = _parts.slice(1).join(' ').trim();
+    if (!_newVer) return reply(`Masukkan versi yang diinginkan.\nContoh: *${prefix}setmc version 1.8.x - 1.21.x*`);
+    const _saved = _mcMod.saveMcConfig({ version: _newVer });
+    return reply(`*VERSI MINECRAFT DIUBAH*\n\nVersi baru: *${_saved.version}*\nKetik *${prefix}mcstatus* untuk melihat pembaruan.`);
+  }
 
   // Detect if user passed a Panel URL or a ptlc_ key
   if (/^https?:\/\//i.test(_first) || /^panel\./i.test(_first) || /\/server\//i.test(_first) || /^ptlc_/i.test(_first) || /^ptlc_/i.test(_second)) {
