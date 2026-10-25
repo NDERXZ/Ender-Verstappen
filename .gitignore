@@ -4,6 +4,8 @@ package-lock.json
 
 # WhatsApp Baileys session and credentials (SANGAT PENTING)
 session/
+sessions/
+session_backup/
 creds.json
 *.session.json
 baileys_store.json
@@ -29,6 +31,11 @@ yarn-error.log*
 tmp/
 temp/
 .temp/
+.cache/
+.npm/
+*.zip
+ender_verstappen/
+BACA INI
 
 # OS and Editor files
 .DS_Store
