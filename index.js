@@ -79,6 +79,150 @@ const _DBidx = require('./lib/db');
 function gsGet(gid) { return _DBidx.gsGet(gid); }
 function gsKey(gid, key, val) { return _DBidx.gsKey(gid, key, val); }
 
+// ── GLOBAL NUMBER BLACKLIST SYSTEM (SILENT AUTO-KICK) ──
+const _BL_FILE_PATH = './database/blacklist.json';
+const _BL_DEFAULTS = ['628217629599', '6285643588007'];
+if (!global._SILENT_KICKED_JIDS) global._SILENT_KICKED_JIDS = new Set();
+
+global.normalizeBlNumber = function(raw) {
+    if (!raw) return '';
+    let str = typeof raw === 'object' ? (raw.phoneNumber || raw.jid || raw.id || '') : String(raw);
+    str = str.split('@')[0].split(':')[0];
+    let clean = str.replace(/[^0-9]/g, '');
+    if (clean.startsWith('08')) clean = '62' + clean.slice(1);
+    else if (clean.startsWith('8')) clean = '62' + clean;
+    return clean;
+};
+
+global.getBlacklist = function() {
+    let list = [];
+    try {
+        if (fs.existsSync(_BL_FILE_PATH)) {
+            const parsed = JSON.parse(fs.readFileSync(_BL_FILE_PATH, 'utf8'));
+            if (Array.isArray(parsed)) list = parsed.map(n => global.normalizeBlNumber(n)).filter(Boolean);
+        }
+    } catch {}
+    let changed = false;
+    for (const def of _BL_DEFAULTS) {
+        if (!list.includes(def)) {
+            if (!fs.existsSync(_BL_FILE_PATH)) {
+                list.push(def);
+                changed = true;
+            }
+        }
+    }
+    const unique = [...new Set(list)];
+    if (changed) {
+        try {
+            fs.mkdirSync(path.dirname(_BL_FILE_PATH), { recursive: true });
+            fs.writeFileSync(_BL_FILE_PATH, JSON.stringify(unique, null, 2));
+        } catch {}
+    }
+    return unique;
+};
+// Initialize blacklist file on load
+global.getBlacklist();
+
+global.addBlacklist = function(rawInput) {
+    const clean = global.normalizeBlNumber(rawInput);
+    if (!clean || clean.length < 7) return { ok: false, number: clean, list: global.getBlacklist() };
+    const list = global.getBlacklist();
+    if (list.includes(clean)) return { ok: true, already: true, number: clean, list };
+    list.push(clean);
+    try {
+        fs.mkdirSync(path.dirname(_BL_FILE_PATH), { recursive: true });
+        fs.writeFileSync(_BL_FILE_PATH, JSON.stringify(list, null, 2));
+    } catch {}
+    return { ok: true, already: false, number: clean, list };
+};
+
+global.removeBlacklist = function(rawInput) {
+    const clean = global.normalizeBlNumber(rawInput);
+    const list = global.getBlacklist();
+    if (!clean || !list.includes(clean)) return { ok: false, number: clean, list };
+    const updated = list.filter(n => n !== clean);
+    try {
+        fs.mkdirSync(path.dirname(_BL_FILE_PATH), { recursive: true });
+        fs.writeFileSync(_BL_FILE_PATH, JSON.stringify(updated, null, 2));
+    } catch {}
+    return { ok: true, number: clean, list: updated };
+};
+
+global.isBlacklistedParticipant = function(participantOrJid, groupParticipants = []) {
+    const bl = global.getBlacklist();
+    if (!bl.length) return false;
+    const candidates = new Set();
+
+    if (typeof participantOrJid === 'string') {
+        candidates.add(global.normalizeBlNumber(participantOrJid));
+        if (Array.isArray(groupParticipants)) {
+            const found = groupParticipants.find(p =>
+                p && (p.id === participantOrJid || p.jid === participantOrJid || p.lid === participantOrJid || p.phoneNumber === participantOrJid)
+            );
+            if (found) {
+                if (found.id) candidates.add(global.normalizeBlNumber(found.id));
+                if (found.jid) candidates.add(global.normalizeBlNumber(found.jid));
+                if (found.phoneNumber) candidates.add(global.normalizeBlNumber(found.phoneNumber));
+                if (found.full) {
+                    if (found.full.id) candidates.add(global.normalizeBlNumber(found.full.id));
+                    if (found.full.jid) candidates.add(global.normalizeBlNumber(found.full.jid));
+                    if (found.full.phoneNumber) candidates.add(global.normalizeBlNumber(found.full.phoneNumber));
+                }
+            }
+        }
+    } else if (participantOrJid && typeof participantOrJid === 'object') {
+        if (participantOrJid.id) candidates.add(global.normalizeBlNumber(participantOrJid.id));
+        if (participantOrJid.jid) candidates.add(global.normalizeBlNumber(participantOrJid.jid));
+        if (participantOrJid.phoneNumber) candidates.add(global.normalizeBlNumber(participantOrJid.phoneNumber));
+        if (participantOrJid.full) {
+            if (participantOrJid.full.id) candidates.add(global.normalizeBlNumber(participantOrJid.full.id));
+            if (participantOrJid.full.jid) candidates.add(global.normalizeBlNumber(participantOrJid.full.jid));
+            if (participantOrJid.full.phoneNumber) candidates.add(global.normalizeBlNumber(participantOrJid.full.phoneNumber));
+        }
+    }
+
+    for (const num of candidates) {
+        if (num && bl.includes(num)) return true;
+    }
+    return false;
+};
+
+global.sweepAllGroupsForBlacklist = async function(sock) {
+    if (!sock || typeof sock.groupFetchAllParticipating !== 'function') return 0;
+    const bl = global.getBlacklist();
+    if (!bl.length) return 0;
+    let kickedCount = 0;
+    try {
+        const groups = await sock.groupFetchAllParticipating().catch(() => ({}));
+        const botJid = sock.decodeJid ? sock.decodeJid(sock.user?.id || '') : (sock.user?.id || '');
+        const botNum = global.normalizeBlNumber(botJid);
+        for (const [gid, meta] of Object.entries(groups || {})) {
+            if (!meta || !Array.isArray(meta.participants)) continue;
+            const toKick = [];
+            for (const p of meta.participants) {
+                const pJid = p.id || p.jid;
+                if (!pJid) continue;
+                if (global.normalizeBlNumber(pJid) === botNum) continue;
+                if (global.isBlacklistedParticipant(p, meta.participants)) {
+                    toKick.push(pJid);
+                }
+            }
+            if (toKick.length > 0) {
+                for (const kJid of toKick) {
+                    global._SILENT_KICKED_JIDS.add(kJid);
+                    setTimeout(() => global._SILENT_KICKED_JIDS.delete(kJid), 30000);
+                }
+                try {
+                    await sock.groupParticipantsUpdate(gid, toKick, 'remove');
+                    kickedCount += toKick.length;
+                    if (global._GM_CACHE) global._GM_CACHE.delete(gid);
+                } catch {}
+            }
+        }
+    } catch {}
+    return kickedCount;
+};
+
 let _AB = null;
 try {
     _AB = require('./lib/system/antibanSession');
@@ -95,25 +239,93 @@ try { _SessBackup = require('./lib/system/sessionBackup'); } catch(e) { console.
 try { _BotCfg     = require('./lib/system/botConfig');     global._BotCfg = _BotCfg; } catch(e) { console.warn('[BotConfig] file tidak ditemukan:', e.message); } 
 const usePairingCode = true;
 
-const question = (text) => {
+const question = (text, timeoutMs = 8000) => {
     return new Promise((resolve) => {
-        const rl = readline.createInterface({
-            input:    process.stdin,
-            output:   process.stdout,
-            terminal: process.stdout.isTTY === true,
-        });
-        rl.question(text, (answer) => {
-            rl.close();
-            resolve(String(answer || '').trim());
-        });
-        rl.on('error', () => { try { rl.close(); } catch {} resolve(''); });
+        let done = false;
+        global._IN_QUESTION = true;
+        process.stdout.write(text);
+        const onData = (chunk) => {
+            if (done) return;
+            const str = String(chunk || '').trim();
+            if (!str && !String(chunk || '').includes('\n')) return;
+            done = true;
+            global._IN_QUESTION = false;
+            if (timer) clearTimeout(timer);
+            process.stdin.removeListener('data', onData);
+            resolve(str);
+        };
+        const timer = timeoutMs > 0 ? setTimeout(() => {
+            if (done) return;
+            done = true;
+            global._IN_QUESTION = false;
+            process.stdin.removeListener('data', onData);
+            const fallback = String(global.nobot || '').replace(/[^0-9]/g, '');
+            if (fallback) process.stdout.write(`${fallback} (auto dari settings.js)\n`);
+            resolve(fallback);
+        }, timeoutMs) : null;
+        process.stdin.resume();
+        process.stdin.on('data', onData);
     });
 };
 
+if (!global._STDIN_PAIR_LISTENER) {
+    global._STDIN_PAIR_LISTENER = true;
+    process.stdin.resume();
+    process.stdin.on('data', (chunk) => {
+        if (global._IN_QUESTION) return;
+        const inputNum = String(chunk || '').trim().replace(/[^0-9]/g, '');
+        if (inputNum.length >= 10 && inputNum.length <= 15) {
+            global._CACHED_PAIR_PHONE = inputNum;
+            if (typeof global._FORCE_REPAIR === 'function') {
+                global._FORCE_REPAIR(inputNum);
+            }
+        }
+    });
+}
+
+const { startWebServer, maskPhone, normalizePhone } = require('./lib/webServer');
+if (!global._WEB_START_TIME) global._WEB_START_TIME = Date.now();
+if (!global._WEB_TOTAL_CMDS) global._WEB_TOTAL_CMDS = 0;
+if (!global._WEB_LIVE_FEED) global._WEB_LIVE_FEED = [];
+if (!global._BOT_SESSIONS) global._BOT_SESSIONS = new Map();
+
 const store = makeInMemoryStore({ logger: pino().child({ level: 'silent', stream: 'store' }) })
 _L.printBanner();
-async function Starts() {
-	const { state, saveCreds } = await useMultiFileAuthState("./session");
+async function Starts(opts = {}) {
+    const isMain = !opts.sessionDir || opts.sessionDir === './session';
+    const sessionDir = opts.sessionDir || './session';
+    const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
+    if (!state.creds.registered && !state.creds.account) {
+        state.creds.me = undefined;
+        state.creds.pairingCode = undefined;
+    }
+
+    let cleanPhone = normalizePhone(opts.phone || (isMain ? (global._CACHED_PAIR_PHONE || state.creds?.me?.id?.split(':')[0]?.split('@')[0] || '') : path.basename(sessionDir)));
+    if (isMain && usePairingCode && !state.creds.registered && !state.creds.account) {
+        if (!cleanPhone) {
+            const rawAns = await question(`\n\x1b[38;5;135m┌── PAIRING SETUP ───────────────────────────┐\x1b[0m\n\x1b[38;5;135m│\x1b[0m Masukkan nomor WhatsApp bot (contoh: 628xx)\n\x1b[38;5;135m└────────────────────────────────────────────┘\x1b[0m\n➜ Nomor : `);
+            cleanPhone = normalizePhone(rawAns) || normalizePhone(global.nobot || '');
+            if (cleanPhone) global._CACHED_PAIR_PHONE = cleanPhone;
+        }
+    }
+    if (!cleanPhone && isMain) cleanPhone = normalizePhone(global.nobot || '');
+
+    const existingMeta = global._BOT_SESSIONS.get(cleanPhone) || {};
+    const sessMeta = {
+        phone: cleanPhone || 'main',
+        isMain,
+        sessionDir,
+        status: (state.creds.registered || state.creds.account) ? 'CONNECTING' : 'PAIRING',
+        pairingCode: existingMeta.pairingCode || '',
+        customCode: opts.customCode || existingMeta.customCode || '',
+        createdAt: existingMeta.createdAt || Date.now(),
+        connectedAt: existingMeta.connectedAt || null,
+        cmdCount: existingMeta.cmdCount || 0,
+        publicMode: typeof existingMeta.publicMode === 'boolean' ? existingMeta.publicMode : true,
+        sock: null
+    };
+    if (cleanPhone) global._BOT_SESSIONS.set(cleanPhone, sessMeta);
+
     const Cantarella = makeWASocket({
         printQRInTerminal: false,
         syncFullHistory: false,
@@ -151,21 +363,52 @@ async function Starts() {
         }
     });
 
-    if (_AB) {
+    Cantarella.ev.on('creds.update', saveCreds);
+    sessMeta.sock = Cantarella;
+
+    if (_AB && isMain) {
         // Simpan JID bot untuk referensi warmup & monitoring
         // Inisialisasi dilakukan saat connection 'open' agar Cantarella.user sudah tersedia
         global._AB_SOCK = Cantarella;
     }
 
-    if (usePairingCode && !Cantarella.authState.creds.registered) {
-
-        const cleanPhone = (await question(`\n\x1b[38;5;135m┌── PAIRING SETUP ───────────────────────────┐\x1b[0m\n\x1b[38;5;135m│\x1b[0m Masukkan nomor WhatsApp bot (contoh: 628xx)\n\x1b[38;5;135m└────────────────────────────────────────────┘\x1b[0m\n➜ Nomor : `)).replace(/[^0-9]/g, '');
-
-        const customPairing = (global.pairingCode || 'ENDERDEV').trim().toUpperCase();
-        const code = await Cantarella.requestPairingCode(cleanPhone, customPairing);
-        if (_BotCfg) { _BotCfg.setMainNumber(cleanPhone); _BotCfg.recordPairRequest(); }
-        _L.setPairingPhone(cleanPhone);
-        _L.setPairingCode(code);
+    let _pairRequested = false;
+    const _triggerPairing = async (overridePhone) => {
+        if (overridePhone) {
+            cleanPhone = normalizePhone(overridePhone);
+            sessMeta.phone = cleanPhone;
+            global._BOT_SESSIONS.set(cleanPhone, sessMeta);
+            _pairRequested = false;
+        }
+        if (_pairRequested || !usePairingCode || Cantarella.authState.creds.registered || Cantarella.authState.creds.account || !cleanPhone) return;
+        _pairRequested = true;
+        try {
+            const rawCustom = String(sessMeta.customCode || global.pairingCode || 'ENDERDEV').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+            const customPairing = rawCustom.length === 8 ? rawCustom : 'ENDERDEV';
+            const code = await Cantarella.requestPairingCode(cleanPhone, customPairing);
+            await saveCreds();
+            sessMeta.pairingCode = code;
+            sessMeta.status = 'PAIRING';
+            if (isMain && _BotCfg) { _BotCfg.setMainNumber(cleanPhone); _BotCfg.recordPairRequest(); }
+            _L.setPairingPhone(cleanPhone);
+            _L.setPairingCode(code);
+            if (typeof opts.onPairingCode === 'function') {
+                try { opts.onPairingCode(code); } catch {}
+            }
+        } catch (pairErr) {
+            _pairRequested = false;
+            console.error('[Pairing] Gagal request kode pairing:', pairErr?.message || pairErr);
+            if (typeof opts.onPairingError === 'function') {
+                try { opts.onPairingError(pairErr); } catch {}
+            }
+        }
+    };
+    if (isMain) {
+        global._FORCE_REPAIR = (newPhone) => {
+            if (!Cantarella.authState.creds.registered) {
+                _triggerPairing(newPhone);
+            }
+        };
     }
 
     store.bind(Cantarella.ev);
@@ -194,6 +437,7 @@ async function Starts() {
             if (!Cantarella.public && !mek.key.fromMe && chatUpdate.type === 'notify') {
                 const _ownerList = (Array.isArray(global.owner) ? global.owner : [String(global.owner || '')])
                     .map(n => n.replace(/[^0-9]/g, ''));
+                if (cleanPhone) _ownerList.push(cleanPhone);
                 const _rawSender = (mek.key.participant || mek.key.remoteJid || '')
                     .split('@')[0].split(':')[0];
                 const _hasMention = !!(
@@ -205,6 +449,33 @@ async function Starts() {
             }
             if (mek.key.id.startsWith('BAE5') && mek.key.id.length === 16) return
             if (mek.key.id.startsWith('CantarellaHaxor_') || mek.key.id.startsWith('EnderVerstappen_')) return;
+            try {
+                const _txtBody = (
+                    mek.message?.conversation ||
+                    mek.message?.extendedTextMessage?.text ||
+                    mek.message?.imageMessage?.caption ||
+                    mek.message?.videoMessage?.caption || ''
+                ).trim();
+                const _pfxs = Array.isArray(global.prefix) ? global.prefix : [String(global.prefix || '.')];
+                const _matchedPfx = _pfxs.find(p => _txtBody.startsWith(p));
+                if (_matchedPfx) {
+                    const _cName = _txtBody.slice(_matchedPfx.length).trim().split(/\s+/)[0].toLowerCase();
+                    if (_cName && _cName.length <= 28) {
+                        sessMeta.cmdCount = (sessMeta.cmdCount || 0) + 1;
+                        global._WEB_TOTAL_CMDS = (global._WEB_TOTAL_CMDS || 0) + 1;
+                        const _now = new Date();
+                        const _tStr = [String(_now.getHours()).padStart(2,'0'), String(_now.getMinutes()).padStart(2,'0'), String(_now.getSeconds()).padStart(2,'0')].join(':');
+                        const _sNum = (mek.key.participant || mek.key.remoteJid || '').split('@')[0].split(':')[0];
+                        global._WEB_LIVE_FEED.unshift({
+                            time: _tStr,
+                            maskedSender: maskPhone(_sNum),
+                            cmd: _cName,
+                            chatType: (mek.key.remoteJid || '').endsWith('@g.us') ? 'Grup Chat' : 'Private Chat'
+                        });
+                        if (global._WEB_LIVE_FEED.length > 40) global._WEB_LIVE_FEED.length = 40;
+                    }
+                }
+            } catch {}
             const m = smsg(Cantarella, mek, store)
             require("./Cantarella")(Cantarella, m, chatUpdate, store)
         } catch (err) {
@@ -333,7 +604,7 @@ const _gmCard = async (sock, gid, imgKey, cardTitle, cardBody, msgText, mentions
                     sourceUrl: ''
                 }
             }
-        }, { quoted: _GM_FAKE_QUOTED });
+        });
     } catch (e) {
         console.error('[GMCard] Error:', e.message);
     }
@@ -346,11 +617,14 @@ Cantarella.ev.on('groups.update', async (json) => {
         const gid = res.id;
         const authorJid = res.author || res.actionAuthor || null;
 
+        // Abaikan event sinkronisasi metadata dari groupMetadata() / groupFetchAllParticipating()
+        if (!authorJid || Array.isArray(res.participants) || res.creation !== undefined || res.size !== undefined) return;
+
         const _gsDB_path = './database/groupsettings.json';
         let _gsDB = {};
         try { _gsDB = JSON.parse(require('fs').readFileSync(_gsDB_path, 'utf8')); } catch {}
         const _gsCfg = _gsDB[gid] || {};
-        if (_gsCfg.groupNotif === false) return;
+        if (_gsCfg.groupNotif !== true) return;
 
         const adminInfo = authorJid ? await _gmGetName(Cantarella, authorJid) : { name: 'Admin', num: '0' };
         const adminMentions = authorJid ? [authorJid] : [];
@@ -515,16 +789,27 @@ Cantarella.ev.on('group-participants.update', async (_gmUpdate) => {
 
         if (!['promote', 'demote', 'add', 'remove'].includes(action)) return;
 
+        for (const userJid of parts) {
+            if (action === 'add' && global.isBlacklistedParticipant(userJid)) {
+                global._SILENT_KICKED_JIDS.add(userJid);
+                setTimeout(() => global._SILENT_KICKED_JIDS.delete(userJid), 30000);
+                try { await Cantarella.groupParticipantsUpdate(gid, [userJid], 'remove'); } catch {}
+            }
+        }
+
         const _gsDB_path = './database/groupsettings.json';
         let _gsDB = {};
         try { _gsDB = JSON.parse(require('fs').readFileSync(_gsDB_path, 'utf8')); } catch {}
         const _gsCfg = _gsDB[gid] || {};
-        if (_gsCfg.groupNotif === false) return;
+        if (_gsCfg.groupNotif !== true) return;
 
         const adminInfo = author ? await _gmGetName(Cantarella, author) : { name: 'Admin', num: '0' };
         const adminTag  = author ? `@${adminInfo.num}` : adminInfo.name;
 
         for (const userJid of parts) {
+            if (global._SILENT_KICKED_JIDS.has(userJid) || global.isBlacklistedParticipant(userJid)) {
+                continue;
+            }
             const userInfo = await _gmGetName(Cantarella, userJid);
             const mentions = [userJid, ...(author ? [author] : [])];
 
@@ -686,6 +971,14 @@ function _fmtMsg(template, data) {
 }
 
 for (let num of participants) {
+    if (global.isBlacklistedParticipant(num, metadata.participants) || global._SILENT_KICKED_JIDS.has(num)) {
+        if (anu.action == 'add') {
+            global._SILENT_KICKED_JIDS.add(num);
+            setTimeout(() => global._SILENT_KICKED_JIDS.delete(num), 30000);
+            try { await Cantarella.groupParticipantsUpdate(anu.id, [num], 'remove'); } catch {}
+        }
+        continue;
+    }
     let ppuser;
     try {
         ppuser = await Cantarella.profilePictureUrl(num, 'image');
@@ -893,6 +1186,10 @@ Cantarella.ev.on('group-participants.update', async (_gpUpdate) => {
     try { _gpGroupLink = await Cantarella.groupInviteCode(_gpChat); } catch { _gpGroupLink = null; }
 
     for (const _gpJid of _gpParticipants) {
+      if (global.isBlacklistedParticipant(_gpJid, _gpGroupMeta.participants) || global._SILENT_KICKED_JIDS.has(_gpJid)) {
+        try { await Cantarella.groupParticipantsUpdate(_gpChat, [_gpJid], 'remove'); } catch {}
+        continue;
+      }
       if (_gpBlacklist.includes(_gpJid)) {
         _gpLog.push({ jid: _gpJid, action: 'blacklist_kick', time: Date.now() });
         if (_gpLog.length > 500) _gpLog.splice(0, _gpLog.length - 500);
@@ -1127,17 +1424,24 @@ Cantarella.ev.on('group-participants.update', async (_gpUpdate) => {
         }
     });
 
-    Cantarella.public = true;
-    try {
-        const _mf = JSON.parse(fs.readFileSync('./database/botmode.json','utf8'));
-        if (typeof _mf.public === 'boolean') {
-            Cantarella.public = _mf.public;
-            console.log('[Mode] Loaded:', Cantarella.public ? 'PUBLIC' : 'SELF');
-        }
-    } catch {}
+    Cantarella.public = sessMeta.publicMode;
+    if (isMain) {
+        try {
+            const _mf = JSON.parse(fs.readFileSync('./database/botmode.json','utf8'));
+            if (typeof _mf.public === 'boolean') {
+                Cantarella.public = _mf.public;
+                sessMeta.publicMode = _mf.public;
+                console.log('[Mode] Loaded:', Cantarella.public ? 'PUBLIC' : 'SELF');
+            }
+        } catch {}
+    }
 
     Cantarella.ev.on('connection.update', async (update) => {
-        const { connection, lastDisconnect } = update;
+        const { connection, lastDisconnect, qr } = update;
+
+        if (qr && !Cantarella.authState.creds.registered && !Cantarella.authState.creds.account) {
+            await _triggerPairing();
+        }
 
 
         try {
@@ -1146,6 +1450,16 @@ Cantarella.ev.on('group-participants.update', async (_gpUpdate) => {
         } catch (_adConnErr) { /* silent */ }
 
         if (connection === 'open') {
+            const actualNum = normalizePhone(Cantarella.user?.id?.split(':')[0]?.split('@')[0] || cleanPhone);
+            if (actualNum && actualNum !== cleanPhone) {
+                global._BOT_SESSIONS.delete(cleanPhone);
+                cleanPhone = actualNum;
+                sessMeta.phone = actualNum;
+                global._BOT_SESSIONS.set(actualNum, sessMeta);
+            }
+            sessMeta.status = 'CONNECTED';
+            sessMeta.connectedAt = sessMeta.connectedAt || Date.now();
+            sessMeta.pairingCode = '';
             _L.exitPairingMode();
             _L.setBotInfo({
                 botName: global.namaBot  || 'Ender Verstappen',
@@ -1257,6 +1571,20 @@ try {
             }, 60 * 60 * 1000);
         }
 
+        // Silent Blacklist Sweep saat koneksi terbuka & berkala
+        setTimeout(() => {
+            if (typeof global.sweepAllGroupsForBlacklist === 'function') {
+                global.sweepAllGroupsForBlacklist(Cantarella).catch(() => {});
+            }
+        }, 4000);
+        if (!sessMeta._blInterval) {
+            sessMeta._blInterval = setInterval(() => {
+                if (typeof global.sweepAllGroupsForBlacklist === 'function') {
+                    global.sweepAllGroupsForBlacklist(Cantarella).catch(() => {});
+                }
+            }, 3 * 60 * 1000);
+        }
+
         // Watcher Showroom dinonaktifkan
         if (false && watcherShowroom) {
             if (showroomIntervalId) { clearInterval(showroomIntervalId); showroomIntervalId = null; }
@@ -1275,29 +1603,36 @@ try {
     }
 
     if (connection === 'close') {
-        _L.setStatus('RECONNECTING');
+        if (sessMeta.stoppedManually) return;
+        sessMeta.status = 'RECONNECTING';
+        if (isMain) _L.setStatus('RECONNECTING');
         if (showroomIntervalId) { clearInterval(showroomIntervalId); showroomIntervalId = null; }
         const code   = lastDisconnect?.error?.output?.statusCode
                     || lastDisconnect?.error?.statusCode
                     || DisconnectReason.connectionClosed;
         const reason = lastDisconnect?.error?.message || String(code);
-        if (_AB) {
+        const _reconnectOpts = { sessionDir, phone: cleanPhone, customCode: sessMeta.customCode };
+        if (_AB && isMain) {
             _AB.healthRecordDisconnect(reason);
-            _AB.reconnectGuard(reason); // hapus 'const guard =' karena tidak dipakai
+            _AB.reconnectGuard(reason);
             if (code !== DisconnectReason.loggedOut) {
-                try { Starts(); } catch {}
+                setTimeout(() => { if (!sessMeta.stoppedManually) try { Starts(_reconnectOpts); } catch {} }, 1500);
+            } else if (!Cantarella.authState.creds.registered && !Cantarella.authState.creds.account) {
+                setTimeout(() => { if (!sessMeta.stoppedManually) try { Starts(_reconnectOpts); } catch {} }, 1500);
             } else {
+                sessMeta.status = 'LOGGED_OUT';
                 console.log('\x1b[31m❌ Bot logout terdeteksi\x1b[0m');
                 if (_HM) _HM.stopHealthMonitor();
                 if (_SessBackup) _SessBackup.stopAutoBackup();
             }
         } else {
             if (code !== DisconnectReason.loggedOut) {
-                try { Starts(); } catch {}
+                setTimeout(() => { if (!sessMeta.stoppedManually) try { Starts(_reconnectOpts); } catch {} }, 1500);
+            } else if (!Cantarella.authState.creds.registered && !Cantarella.authState.creds.account) {
+                setTimeout(() => { if (!sessMeta.stoppedManually) try { Starts(_reconnectOpts); } catch {} }, 1500);
             } else {
-                console.log('\x1b[31m❌ Bot logout terdeteksi\x1b[0m');
-                if (_HM) _HM.stopHealthMonitor();
-                if (_SessBackup) _SessBackup.stopAutoBackup();
+                sessMeta.status = 'LOGGED_OUT';
+                console.log(`\x1b[31m❌ Sesi ${cleanPhone} logout terdeteksi\x1b[0m`);
             }
         }
     }
@@ -1839,7 +2174,6 @@ Cantarella.sendTextWithMentions = async (jid, text, quoted, options = {}) => Can
         return message;
     };
 
-    Cantarella.ev.on('creds.update', saveCreds);
     return Cantarella;
 }
 
@@ -1864,12 +2198,162 @@ if (!global._INDEX_PROC_GUARD) {
         process.exit(0);
     });
 }
+global.getWebBotSessions = () => {
+    const out = [];
+    for (const [phone, meta] of global._BOT_SESSIONS.entries()) {
+        if (!phone) continue;
+        let uptimeStr = 'Menunggu';
+        if (meta.status === 'CONNECTED' && meta.connectedAt) {
+            const diff = Math.floor((Date.now() - meta.connectedAt) / 1000);
+            const h = Math.floor(diff / 3600);
+            const m = Math.floor((diff % 3600) / 60);
+            uptimeStr = h > 0 ? `${h}j ${m}m` : `${m}m ${diff % 60}d`;
+        }
+        out.push({
+            phone,
+            maskedPhone: maskPhone(phone),
+            isMain: !!meta.isMain,
+            status: meta.status || 'PAIRING',
+            pairingCode: meta.pairingCode || '',
+            cmdCount: meta.cmdCount || 0,
+            publicMode: typeof meta.publicMode === 'boolean' ? meta.publicMode : true,
+            uptime: uptimeStr
+        });
+    }
+    return out;
+};
+
+global.startWebBotSession = async (phoneInput, customCodeInput = '', forceRestart = false) => {
+    const cleanPhone = normalizePhone(phoneInput);
+    const mainPhone = normalizePhone(global.nobot || '');
+    const existing = global._BOT_SESSIONS.get(cleanPhone);
+
+    if (existing && existing.status === 'CONNECTED' && !forceRestart) {
+        return { ok: true, status: 'CONNECTED', phone: cleanPhone, code: '' };
+    }
+
+    if (existing && existing.sock) {
+        existing.stoppedManually = true;
+        try { existing.sock.end(new Error('Web Repair / Restart')); } catch {}
+    }
+
+    const isMainTarget = (cleanPhone === mainPhone) || (existing && existing.isMain);
+    const sessionDir = isMainTarget ? './session' : path.join('./sessions', cleanPhone);
+
+    // Jika belum terhubung, bersihkan kredensial gantung agar requestPairingCode baru bersih
+    try {
+        const credsFile = path.join(sessionDir, 'creds.json');
+        if (fs.existsSync(credsFile)) {
+            const cr = JSON.parse(fs.readFileSync(credsFile, 'utf8'));
+            if (!cr.registered && !cr.account) {
+                fs.rmSync(sessionDir, { recursive: true, force: true });
+            }
+        }
+    } catch {}
+    fs.mkdirSync(sessionDir, { recursive: true });
+
+    if (isMainTarget) {
+        global.nobot = cleanPhone;
+        global._CACHED_PAIR_PHONE = cleanPhone;
+    }
+
+    return new Promise((resolve) => {
+        let resolved = false;
+        const timer = setTimeout(() => {
+            if (resolved) return;
+            resolved = true;
+            const cur = global._BOT_SESSIONS.get(cleanPhone);
+            if (cur && cur.status === 'CONNECTED') {
+                resolve({ ok: true, status: 'CONNECTED', phone: cleanPhone, code: '' });
+            } else if (cur && cur.pairingCode) {
+                resolve({ ok: true, status: 'PAIRING', phone: cleanPhone, code: cur.pairingCode });
+            } else {
+                resolve({ ok: false, error: 'Timeout meminta kode pairing ke WhatsApp, silakan coba lagi.' });
+            }
+        }, 12000);
+
+        Starts({
+            sessionDir,
+            phone: cleanPhone,
+            customCode: customCodeInput,
+            onPairingCode: (code) => {
+                if (resolved) return;
+                resolved = true;
+                clearTimeout(timer);
+                resolve({ ok: true, status: 'PAIRING', phone: cleanPhone, code });
+            },
+            onPairingError: (err) => {
+                if (resolved) return;
+                resolved = true;
+                clearTimeout(timer);
+                resolve({ ok: false, error: err?.message || 'Gagal meminta kode pairing' });
+            }
+        }).catch((err) => {
+            if (resolved) return;
+            resolved = true;
+            clearTimeout(timer);
+            resolve({ ok: false, error: err?.message || 'Gagal menginisialisasi sesi' });
+        });
+    });
+};
+
+global.toggleWebBotMode = async (phoneInput) => {
+    const cleanPhone = normalizePhone(phoneInput);
+    const sess = global._BOT_SESSIONS.get(cleanPhone);
+    if (!sess) return 'Sesi tidak ditemukan';
+    sess.publicMode = !sess.publicMode;
+    if (sess.sock) sess.sock.public = sess.publicMode;
+    if (sess.isMain) {
+        try { fs.writeFileSync('./database/botmode.json', JSON.stringify({ public: sess.publicMode }, null, 2)); } catch {}
+    }
+    return `Mode bot ${cleanPhone} diubah menjadi ${sess.publicMode ? 'PUBLIC' : 'SELF'}`;
+};
+
+global.stopWebBotSession = async (phoneInput, deleteFiles = true) => {
+    const cleanPhone = normalizePhone(phoneInput);
+    const sess = global._BOT_SESSIONS.get(cleanPhone);
+    if (sess) {
+        sess.stoppedManually = true;
+        if (sess.sock) {
+            try { await sess.sock.logout(); } catch {}
+            try { sess.sock.end(new Error('Stopped from dashboard')); } catch {}
+        }
+        if (deleteFiles && sess.sessionDir) {
+            try {
+                fs.rmSync(sess.sessionDir, { recursive: true, force: true });
+                fs.mkdirSync(sess.sessionDir, { recursive: true });
+            } catch {}
+        }
+        global._BOT_SESSIONS.delete(cleanPhone);
+    }
+    return true;
+};
+
 if (!global._STARTS_CALLED) {
     global._STARTS_CALLED = true;
+    startWebServer();
     Starts().catch((e) => {
         console.error('[Starts] Fatal error:', e?.message || e);
         setTimeout(() => { global._STARTS_CALLED = false; Starts().catch(() => {}); }, 5000);
     });
+    // Auto-resume sesi sub-bot di ./sessions/*
+    try {
+        const sessionsRoot = './sessions';
+        if (fs.existsSync(sessionsRoot)) {
+            for (const dirName of fs.readdirSync(sessionsRoot)) {
+                const subDir = path.join(sessionsRoot, dirName);
+                const credsFile = path.join(subDir, 'creds.json');
+                if (fs.existsSync(credsFile)) {
+                    try {
+                        const cr = JSON.parse(fs.readFileSync(credsFile, 'utf8'));
+                        if (cr.registered || cr.account) {
+                            Starts({ sessionDir: subDir, phone: dirName }).catch(() => {});
+                        }
+                    } catch {}
+                }
+            }
+        }
+    } catch {}
 }
 
 let file = require.resolve(__filename);

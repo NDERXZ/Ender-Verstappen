@@ -13,7 +13,7 @@ if (fs.existsSync('./.env')) {
 }
 
 global.owner = ["62895327468806"] //NOMOR OWNER
-global.nobot = "6287724199227" //NOMOR BOT
+global.nobot = "6281973866718" //NOMOR BOT
 global.nomorowner = '62895327468806' //NOMOR OWNER
 global.namaowner = "Chaidar" //NAMA OWNER LO
 global.namaBot = "Ender Verstappen" //NAMA BOT LO

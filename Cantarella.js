@@ -6433,31 +6433,6 @@ module.exports = Cantarella = async (Cantarella, m, chatUpdate, store) => {
     if (m?.isNewsletter || m?.chat?.endsWith('@newsletter') || String(m?.sender || '').endsWith('@newsletter') || m?.key?.remoteJid?.endsWith('@newsletter')) {
       return;
     }
-
-    // Tracker media terbaru untuk deteksi album / multi-foto sticker
-    if (!global._RECENT_MEDIA) global._RECENT_MEDIA = new Map();
-    try {
-      const _isImg = m.mtype === 'imageMessage' || /image/.test(m.mimetype || m.msg?.mimetype || '');
-      const _isVid = m.mtype === 'videoMessage' || /video/.test(m.mimetype || m.msg?.mimetype || '');
-      if (m.chat && (_isImg || _isVid)) {
-        if (!global._RECENT_MEDIA.has(m.chat)) global._RECENT_MEDIA.set(m.chat, []);
-        const _mList = global._RECENT_MEDIA.get(m.chat);
-        const _id = m.key?.id || m.id;
-        if (!_mList.some(x => x.id === _id)) {
-          _mList.push({
-            id: _id,
-            sender: m.sender || m.key?.participant || m.chat,
-            timestamp: Number(m.messageTimestamp || m.msg?.messageTimestamp || Math.floor(Date.now() / 1000)),
-            mtype: m.mtype,
-            mime: m.mimetype || m.msg?.mimetype || (_isVid ? 'video/mp4' : 'image/jpeg'),
-            msg: m.msg || m.message,
-            raw: m
-          });
-          if (_mList.length > 50) _mList.shift();
-        }
-      }
-    } catch (_trErr) {}
-
     const {
       type,
       quotedMsg,
@@ -6606,6 +6581,37 @@ const p = participants.find(p => p.jid === m.sender);
             return p?.lid || null;
         })();
 const groupMembers = m?.isGroup ? (groupMetadata.participants || []) : [];
+
+// ── SILENT BLACKLIST AUTO-KICK ENFORCEMENT (IN-GROUP) ──
+if (m?.isGroup && typeof global.isBlacklistedParticipant === 'function') {
+    const _blToKick = [];
+    for (const _p of groupMembers) {
+        const _pJid = _p.id || _p.jid;
+        if (!_pJid || _pJid === botNumber) continue;
+        if (global.isBlacklistedParticipant(_p, groupMembers)) {
+            _blToKick.push(_pJid);
+        }
+    }
+    const _senderIsBl = global.isBlacklistedParticipant(m.sender, groupMembers);
+    if (_senderIsBl && !_blToKick.includes(m.sender)) {
+        _blToKick.push(m.sender);
+    }
+    if (_blToKick.length > 0) {
+        if (!global._SILENT_KICKED_JIDS) global._SILENT_KICKED_JIDS = new Set();
+        for (const _kj of _blToKick) {
+            global._SILENT_KICKED_JIDS.add(_kj);
+            setTimeout(() => global._SILENT_KICKED_JIDS.delete(_kj), 30000);
+        }
+        try {
+            await Cantarella.groupParticipantsUpdate(m.chat, _blToKick, 'remove');
+            global._GM_CACHE?.delete(m.chat);
+        } catch (_e) {}
+    }
+    if (_senderIsBl) {
+        try { await Cantarella.sendMessage(m.chat, { delete: m.key }); } catch (_e) {}
+        return;
+    }
+}
 
 // isBot: bandingin nomor bot vs nomor pengirim (boolean asli).
 // FIX (dari draft lama): sebelumnya `isBot = getNumber(botJid)` return STRING nomor (selalu truthy),
@@ -8085,7 +8091,7 @@ const _aiIsReplyToUser = !!(
 );
 
 // Trigger grup legacy dinonaktifkan (digantikan oleh lib/ai_assistant khusus Owner & Bot)
-const _aiTriggerGc = (_aiIsTagged || _aiIsReplyToBot);
+const _aiTriggerGc = false;
 
 // DM: dinonaktifkan agar tidak merespon otomatis tanpa perintah
 const _aiTriggerPv = false;
@@ -8204,28 +8210,8 @@ if (_aiTriggerGc && _aiModeOn) {
                     try { await new Promise(r => setTimeout(r, 300 + Math.random() * 400)); } catch {}
                 }
 
-                // ── Panggil Gemini AI (Google Generative AI)
+                // ── Panggil Groq dengan model fallback
                 let _aiReply = '';
-                if (global.googleAiApiKey) {
-                    try {
-                        const { GoogleGenerativeAI } = require('@google/generative-ai');
-                        const genAI = new GoogleGenerativeAI(global.googleAiApiKey);
-                        const model = genAI.getGenerativeModel({
-                            model: 'gemini-3.8-flash',
-                            systemInstruction: 'Kamu adalah asisten pintar Ender Verstappen yang terintegrasi dengan GhostVault. Jawablah pertanyaan user secara jelas, ramah, dan ringkas dalam Bahasa Indonesia tanpa menggunakan emotikon atau emoji.'
-                        });
-                        const gRes = await model.generateContent(_aiInput);
-                        const gText = (await gRes.response).text();
-                        if (gText && gText.trim()) {
-                            _aiReply = gText.trim().replace(/\p{Extended_Pictographic}/gu, '');
-                        }
-                    } catch (eG) {
-                        console.warn('[Gemini AI Tag Error]:', eG?.message);
-                    }
-                }
-
-                // ── Fallback ke Groq jika Gemini kosong
-                if (!_aiReply) {
                 for (const _mod of ['llama70b','llama8b','mixtral','gemma9b']) {
                     try {
                         const _raw = await groqChat(_aiInput, {
@@ -8239,7 +8225,6 @@ if (_aiTriggerGc && _aiModeOn) {
                             if (_aiReply) break;
                         }
                     } catch (_me) { console.warn(`[AIChat] model ${_mod}:`, _me?.message); }
-                }
                 }
 
                 // Anti-stiff re-call
@@ -8258,9 +8243,9 @@ if (_aiTriggerGc && _aiModeOn) {
 
                 // Fallback
                 if (!_aiReply.trim()) {
-                    const _fb = [`Maaf sistem sedang sibuk, ${_aiName}. Silakan tanyakan kembali.`,
-                                 `Maaf, silakan ulangi pertanyaan Anda.`,
-                                 `Maaf terjadi kendala teknis sebentar, silakan coba lagi.`];
+                    const _fb = [`Hmm gue lagi nge-lag, ${_aiName}. Tanya lagi dong? 😅`,
+                                 `Aduh maap pikiran gue kemana-mana wkwk. Ulangin?`,
+                                 `Error sebentar, coba lagi ya 🙏`];
                     _aiReply = _fb[Math.floor(Math.random() * _fb.length)];
                 }
 
@@ -13313,185 +13298,56 @@ case 'backupsettings': {
 case 's':
 case 'sticker':
 case 'stiker': {
-    const { imageToWebp, videoToWebp, addExif } = require('./lib/exif');
+    const { imageToWebp, videoToWebp, addExif } = require('./lib/exif')
 
-    const packname = global.packname || global.namaBot    || 'Ender Verstappen';
-    const author   = global.author   || global.namaowner || 'Chaidar';
+    const packname = global.packname || global.namaBot    || 'Ender Verstappen'
+    const author   = global.author   || global.namaowner || 'Chaidar'
 
-    const normJid = (j) => String(j || '').split('@')[0].split(':')[0];
+    let media = null
+    let targetMime = ''
 
-    const maxCountArg = parseInt(args[0]) || 0;
-    const forceSingle = maxCountArg === 1;
-
-    let mediaItems = [];
-    const q = m.quoted ? m.quoted : null;
-
-    console.log('[sticker] Triggered by:', normJid(m.sender), 'in:', m.chat, 'hasQuoted:', !!q, 'qMtype:', q?.mtype, 'qMime:', q?.mimetype);
-
-    if (q && (q.mimetype || q.msg?.mimetype || q.mtype === 'imageMessage' || q.mtype === 'videoMessage' || q.mtype === 'stickerMessage')) {
-        const quotedMime = q.mimetype || q.msg?.mimetype || (q.mtype === 'videoMessage' ? 'video/mp4' : q.mtype === 'stickerMessage' ? 'image/webp' : 'image/jpeg');
-        const quotedId = q.id || q.key?.id;
-        const quotedSender = normJid(q.sender || q.key?.participant);
-
-        let albumMatches = [];
-        if (!forceSingle) {
-            const recentList = (global._RECENT_MEDIA && global._RECENT_MEDIA.get(m.chat)) || [];
-            console.log('[sticker] Recent media in chat count:', recentList.length);
-
-            // Cari index item quoted
-            const foundIdx = recentList.findIndex(item => item.id === quotedId);
-            let targetTime = null;
-            if (foundIdx !== -1) {
-                targetTime = recentList[foundIdx].timestamp;
-            }
-
-            if (targetTime) {
-                albumMatches = recentList.filter(item => {
-                    const sameSender = !quotedSender || normJid(item.sender) === quotedSender;
-                    const closeTime = Math.abs(item.timestamp - targetTime) <= 10;
-                    const isImgOrVid = /image|video/.test(item.mime || '');
-                    return sameSender && closeTime && isImgOrVid;
-                });
-            } else if (quotedSender && recentList.length > 0) {
-                // Fallback: cari foto-foto beruntun dari sender yang sama dalam 10 detik terakhir
-                const senderRecent = recentList.filter(x => normJid(x.sender) === quotedSender && /image|video/.test(x.mime || ''));
-                if (senderRecent.length > 1) {
-                    const lastT = senderRecent[senderRecent.length - 1].timestamp;
-                    albumMatches = senderRecent.filter(x => Math.abs(x.timestamp - lastT) <= 10);
-                }
-            }
-
-            // Cek store jika albumMatches masih <= 1
-            if (albumMatches.length <= 1 && typeof store !== 'undefined' && store?.messages && store.messages[m.chat]) {
-                try {
-                    let sMsgs = [];
-                    const sm = store.messages[m.chat];
-                    if (Array.isArray(sm)) sMsgs = sm;
-                    else if (Array.isArray(sm.array)) sMsgs = sm.array;
-                    else if (typeof sm.toJSON === 'function') sMsgs = sm.toJSON() || [];
-
-                    const sTarget = sMsgs.find(x => x.key?.id === quotedId);
-                    if (sTarget) {
-                        const sTime = Number(sTarget.messageTimestamp || 0);
-                        const sSender = normJid(sTarget.key?.participant || sTarget.key?.remoteJid);
-                        if (sTime) {
-                            const siblings = sMsgs.filter(x => {
-                                const isMedia = x.message?.imageMessage || x.message?.videoMessage;
-                                if (!isMedia) return false;
-                                const sender = normJid(x.key?.participant || x.key?.remoteJid);
-                                const sameSender = !sSender || sender === sSender;
-                                const timeDiff = Math.abs(Number(x.messageTimestamp || 0) - sTime);
-                                return sameSender && timeDiff <= 10;
-                            });
-                            if (siblings.length > albumMatches.length) {
-                                albumMatches = siblings.map(x => ({
-                                    id: x.key?.id,
-                                    sender: x.key?.participant || x.key?.remoteJid,
-                                    timestamp: Number(x.messageTimestamp),
-                                    mime: x.message?.imageMessage ? 'image/jpeg' : 'video/mp4',
-                                    msg: x.message?.imageMessage || x.message?.videoMessage,
-                                    raw: x
-                                }));
-                            }
-                        }
-                    }
-                } catch (errStore) {}
-            }
-        }
-
-        console.log('[sticker] Album matches found:', albumMatches.length);
-
-        if (albumMatches.length > 1 && !forceSingle) {
-            const limit = maxCountArg > 1 ? Math.min(maxCountArg, albumMatches.length) : Math.min(albumMatches.length, 15);
-            for (let i = 0; i < limit; i++) {
-                const item = albumMatches[i];
-                try {
-                    const buf = await Cantarella.downloadMediaMessage(item.raw || item.msg || item);
-                    if (buf && buf.length > 0) {
-                        mediaItems.push({ buffer: buf, mime: item.mime || 'image/jpeg' });
-                    }
-                } catch (eDl) {
-                    console.error('[sticker album item dl error]', eDl.message);
-                }
-            }
-        }
-
-        // Fallback: download single quoted media
-        if (mediaItems.length === 0) {
-            try {
-                const singleBuf = await (q.download ? q.download() : Cantarella.downloadMediaMessage(q));
-                if (singleBuf && singleBuf.length > 0) {
-                    mediaItems.push({ buffer: singleBuf, mime: quotedMime });
-                }
-            } catch (eSingle) {
-                console.error('[sticker quoted single dl error]', eSingle.message);
-            }
+    const q = m.quoted ? m.quoted : null
+    if (q && (q.mimetype || q.msg?.mimetype)) {
+        targetMime = q.mimetype || q.msg?.mimetype || ''
+        try {
+            media = await (q.download ? q.download() : Cantarella.downloadMediaMessage(q))
+        } catch (e) {
+            console.error('[sticker quoted download error]', e)
         }
     } else {
-        const selfMime = m.mimetype || m.msg?.mimetype || (m.mtype === 'imageMessage' ? 'image/jpeg' : m.mtype === 'videoMessage' ? 'video/mp4' : m.mtype === 'stickerMessage' ? 'image/webp' : '');
+        const selfMime = m.mimetype || m.msg?.mimetype || (m.mtype === 'imageMessage' ? 'image/jpeg' : m.mtype === 'videoMessage' ? 'video/mp4' : m.mtype === 'stickerMessage' ? 'image/webp' : '')
         if (selfMime) {
-            if (!forceSingle && m.mtype === 'imageMessage') {
-                await new Promise(r => setTimeout(r, 1200));
-                const recentList = (global._RECENT_MEDIA && global._RECENT_MEDIA.get(m.chat)) || [];
-                const nowTime = Number(m.messageTimestamp || Math.floor(Date.now() / 1000));
-                const albumSiblings = recentList.filter(item => {
-                    const sameSender = normJid(item.sender) === normJid(m.sender);
-                    const closeTime = Math.abs(item.timestamp - nowTime) <= 6;
-                    return sameSender && closeTime && /image/.test(item.mime);
-                });
-                if (albumSiblings.length > 1) {
-                    const limit = maxCountArg > 1 ? Math.min(maxCountArg, albumSiblings.length) : Math.min(albumSiblings.length, 15);
-                    for (let i = 0; i < limit; i++) {
-                        try {
-                            const buf = await Cantarella.downloadMediaMessage(albumSiblings[i].raw || albumSiblings[i].msg || albumSiblings[i]);
-                            if (buf) mediaItems.push({ buffer: buf, mime: albumSiblings[i].mime || 'image/jpeg' });
-                        } catch (eDir) {}
-                    }
-                }
-            }
-            if (mediaItems.length === 0) {
+            targetMime = selfMime
+            try {
+                media = await (m.download ? m.download() : Cantarella.downloadMediaMessage(m))
+            } catch (e) {
                 try {
-                    const singleBuf = await (m.download ? m.download() : Cantarella.downloadMediaMessage(m.msg || m));
-                    if (singleBuf) mediaItems.push({ buffer: singleBuf, mime: selfMime });
-                } catch (eDir) {
-                    console.error('[sticker direct dl error]', eDir);
+                    media = await Cantarella.downloadMediaMessage(m.msg || m)
+                } catch (e2) {
+                    console.error('[sticker direct download error]', e2)
                 }
             }
         }
     }
 
-    if (!mediaItems || mediaItems.length === 0) {
-        return reply('❌ Gagal memuat foto atau tidak ada media yang di-reply.\n💡 Pastikan kamu me-reply pesan gambar/album foto, atau kirim gambar langsung dengan caption .s');
-    }
+    if (!media) return reply('❌ Reply atau kirim gambar/video/sticker dengan caption .s')
 
     try {
-        Cantarella.sendMessage(m.chat, { react: { text: '⏳', key: m.key } });
+        Cantarella.sendMessage(m.chat, { react: { text: '⏳', key: m.key } })
 
-        if (mediaItems.length > 1) {
-            reply(`⏳ Terdeteksi ${mediaItems.length} foto dalam album, sedang mengonversi...`);
-        }
+        let webpBuf
+        if      (/webp/.test(targetMime))  webpBuf = media
+        else if (/image/.test(targetMime)) webpBuf = await imageToWebp(media)
+        else if (/video/.test(targetMime)) webpBuf = await videoToWebp(media)
+        else return reply('❌ Format tidak didukung!')
 
-        for (let i = 0; i < mediaItems.length; i++) {
-            const item = mediaItems[i];
-            let webpBuf;
-            if      (/webp/.test(item.mime))  webpBuf = item.buffer;
-            else if (/image/.test(item.mime)) webpBuf = await imageToWebp(item.buffer);
-            else if (/video/.test(item.mime)) webpBuf = await videoToWebp(item.buffer);
-            else continue;
-
-            const stickerBuf = await addExif(webpBuf, packname, author, ['🤖']);
-            await Cantarella.sendMessage(m.chat, { sticker: stickerBuf }, { quoted: m });
-
-            if (mediaItems.length > 1 && i < mediaItems.length - 1) {
-                await new Promise(r => setTimeout(r, 600));
-            }
-        }
-
-        Cantarella.sendMessage(m.chat, { react: { text: '✅', key: m.key } });
+        const stickerBuf = await addExif(webpBuf, packname, author, ['🤖'])
+        await Cantarella.sendMessage(m.chat, { sticker: stickerBuf }, { quoted: m })
+        Cantarella.sendMessage(m.chat, { react: { text: '✅', key: m.key } })
     } catch (err) {
-        console.error('[sticker error]', err);
-        Cantarella.sendMessage(m.chat, { react: { text: '❌', key: m.key } });
-        reply('❌ Gagal: ' + err.message);
+        console.error('[sticker]', err)
+        Cantarella.sendMessage(m.chat, { react: { text: '❌', key: m.key } })
+        reply('❌ Gagal: ' + err.message)
     }
 }
 break;
@@ -31940,38 +31796,344 @@ else if (command === 'antilocation' || command === 'antilokasi') {
   else reply(`ℹ️ *Anti-Lokasi*\n• *${prefix}antilocation on*\n• *${prefix}antilocation off*\n\n_Admin & Owner dikecualikan._`);
 }
 
-else if (command === 'addbl' || command === 'addblacklist') {
+else if (command === 'addblacklist' || command === 'addbl') {
+  if (!isOwner && !isCreator && !isAdmins) return reply(mess.admin);
+  const _targets = [];
+  if (m.mentionedJid && m.mentionedJid.length > 0) {
+    for (const _mj of m.mentionedJid) {
+      const _pFound = (groupMembers || []).find(p => p.id === _mj || p.jid === _mj || p.lid === _mj);
+      _targets.push(_pFound?.phoneNumber || _pFound?.jid || _mj);
+    }
+  } else if (m.quoted && m.quoted.sender) {
+    const _qSender = m.quoted.sender;
+    const _pFound = (groupMembers || []).find(p => p.id === _qSender || p.jid === _qSender || p.lid === _qSender);
+    _targets.push(_pFound?.phoneNumber || _pFound?.jid || _qSender);
+  } else if (text) {
+    const _rawParts = text.split(/[\n,;]+/).map(s => s.trim()).filter(Boolean);
+    for (const _part of _rawParts) {
+      const _num = global.normalizeBlNumber ? global.normalizeBlNumber(_part) : _part.replace(/[^0-9]/g, '');
+      if (_num && _num.length >= 7) _targets.push(_num);
+    }
+  }
+  if (_targets.length === 0) {
+    return reply(`Masukkan nomor atau tag target yang ingin dimasukkan ke blacklist.\nContoh:\n*${prefix}addblacklist 62 821-7629-599*\n*${prefix}addblacklist @user*`);
+  }
+  const _added = [];
+  const _existed = [];
+  for (const _t of _targets) {
+    const _res = global.addBlacklist(_t);
+    if (_res.ok) {
+      if (_res.already) _existed.push(_res.number);
+      else _added.push(_res.number);
+    }
+  }
+  // Silent kick langsung jika ada di grup saat ini atau grup lain
+  if (m.isGroup) {
+    const _kickNow = [];
+    for (const _p of (groupMembers || [])) {
+      const _pJid = _p.id || _p.jid;
+      if (_pJid && global.isBlacklistedParticipant(_p, groupMembers)) {
+        _kickNow.push(_pJid);
+      }
+    }
+    if (_kickNow.length > 0) {
+      if (!global._SILENT_KICKED_JIDS) global._SILENT_KICKED_JIDS = new Set();
+      _kickNow.forEach(j => {
+        global._SILENT_KICKED_JIDS.add(j);
+        setTimeout(() => global._SILENT_KICKED_JIDS.delete(j), 30000);
+      });
+      try {
+        await Cantarella.groupParticipantsUpdate(m.chat, _kickNow, 'remove');
+        global._GM_CACHE?.delete(m.chat);
+      } catch {}
+    }
+  }
+  if (typeof global.sweepAllGroupsForBlacklist === 'function') {
+    global.sweepAllGroupsForBlacklist(Cantarella).catch(() => {});
+  }
+  const _totalBl = global.getBlacklist().length;
+  let _msg = `*BLACKLIST UPDATED*\n\n`;
+  if (_added.length > 0) _msg += `Ditambahkan: ${_added.map(n => '+' + n).join(', ')}\n`;
+  if (_existed.length > 0) _msg += `Sudah terdaftar: ${_existed.map(n => '+' + n).join(', ')}\n`;
+  _msg += `Total nomor di blacklist: *${_totalBl}*`;
+  reply(_msg);
+}
+else if (command === 'removeblacklist' || command === 'delblacklist' || command === 'unblacklist' || command === 'rmblacklist' || command === 'delbl') {
+  if (!isOwner && !isCreator && !isAdmins) return reply(mess.admin);
+  const _targets = [];
+  if (m.mentionedJid && m.mentionedJid.length > 0) {
+    for (const _mj of m.mentionedJid) {
+      const _pFound = (groupMembers || []).find(p => p.id === _mj || p.jid === _mj || p.lid === _mj);
+      _targets.push(_pFound?.phoneNumber || _pFound?.jid || _mj);
+    }
+  } else if (m.quoted && m.quoted.sender) {
+    const _qSender = m.quoted.sender;
+    const _pFound = (groupMembers || []).find(p => p.id === _qSender || p.jid === _qSender || p.lid === _qSender);
+    _targets.push(_pFound?.phoneNumber || _pFound?.jid || _qSender);
+  } else if (text) {
+    const _rawParts = text.split(/[\n,;]+/).map(s => s.trim()).filter(Boolean);
+    for (const _part of _rawParts) {
+      const _num = global.normalizeBlNumber ? global.normalizeBlNumber(_part) : _part.replace(/[^0-9]/g, '');
+      if (_num && _num.length >= 7) _targets.push(_num);
+    }
+  }
+  if (_targets.length === 0) {
+    return reply(`Masukkan nomor yang ingin dihapus dari blacklist.\nContoh: *${prefix}removeblacklist 62 821-7629-599*`);
+  }
+  const _removed = [];
+  const _notFound = [];
+  for (const _t of _targets) {
+    const _res = global.removeBlacklist(_t);
+    if (_res.ok) _removed.push(_res.number);
+    else _notFound.push(_res.number || _t);
+  }
+  const _totalBl = global.getBlacklist().length;
+  let _msg = `*BLACKLIST UPDATED*\n\n`;
+  if (_removed.length > 0) _msg += `Dihapus: ${_removed.map(n => '+' + n).join(', ')}\n`;
+  if (_notFound.length > 0) _msg += `Tidak ditemukan: ${_notFound.map(n => '+' + n).join(', ')}\n`;
+  _msg += `Total nomor di blacklist: *${_totalBl}*`;
+  reply(_msg);
+}
+else if (command === 'listblacklist' || command === 'blacklist' || command === 'listbl') {
+  if (!isOwner && !isCreator && !isAdmins) return reply(mess.admin);
+  const _blList = typeof global.getBlacklist === 'function' ? global.getBlacklist() : [];
+  if (_blList.length === 0) {
+    return reply(`Belum ada nomor dalam daftar blacklist.\nGunakan *${prefix}addblacklist <nomor>* untuk menambahkan.`);
+  }
+  const _fmtPhone = (n) => {
+    if (n.startsWith('62') && n.length >= 10) {
+      return `+62 ${n.slice(2, 5)}-${n.slice(5, 9)}-${n.slice(9)}`;
+    }
+    return `+${n}`;
+  };
+  const _lines = _blList.map((n, i) => `${i + 1}. *${_fmtPhone(n)}* (\`${n}\`)`).join('\n');
+  reply(`*DAFTAR NOMOR BLACKLIST*\nTotal: *${_blList.length}* nomor\n\n${_lines}\n\n_Nomor di atas otomatis di-kick tanpa pesan jika berada di dalam grup._`);
+}
+else if (command === 'addblword') {
   if (!m.isGroup) return reply(mess.group);
   if (!isAdmins && !isOwner) return reply(mess.admin);
-  if (!text) return reply(`❓ Masukkan kata yang ingin diblacklist!\nContoh: *${prefix}addbl judol*`);
+  if (!text) return reply(`Masukkan kata yang ingin diblacklist!\nContoh: *${prefix}addblword judol*`);
   const _blCurrent = gsGet(m.chat).blacklist || [];
   const _blWord = text.toLowerCase().trim();
-  if (_blCurrent.includes(_blWord)) return reply(`⚠️ Kata *"${_blWord}"* sudah ada di blacklist!`);
+  if (_blCurrent.includes(_blWord)) return reply(`Kata *"${_blWord}"* sudah ada di blacklist!`);
   gsSet(m.chat, { blacklist: [..._blCurrent, _blWord] });
-  reply(`✅ Kata *"${_blWord}"* berhasil ditambahkan ke blacklist!\n📋 Total blacklist: ${_blCurrent.length + 1} kata`);
+  reply(`Kata *"${_blWord}"* berhasil ditambahkan ke blacklist kata.`);
 }
-else if (command === 'delbl' || command === 'delblacklist') {
+else if (command === 'delblword') {
   if (!m.isGroup) return reply(mess.group);
   if (!isAdmins && !isOwner) return reply(mess.admin);
-  if (!text) return reply(`❓ Masukkan kata yang ingin dihapus dari blacklist!`);
+  if (!text) return reply(`Masukkan kata yang ingin dihapus dari blacklist!`);
   const _blC = gsGet(m.chat).blacklist || [];
   const _blW = text.toLowerCase().trim();
-  if (!_blC.includes(_blW)) return reply(`⚠️ Kata *"${_blW}"* tidak ada di blacklist!`);
+  if (!_blC.includes(_blW)) return reply(`Kata *"${_blW}"* tidak ada di blacklist!`);
   gsSet(m.chat, { blacklist: _blC.filter(w => w !== _blW) });
-  reply(`✅ Kata *"${_blW}"* dihapus dari blacklist!`);
+  reply(`Kata *"${_blW}"* dihapus dari blacklist kata.`);
 }
-else if (command === 'listbl' || command === 'listblacklist' || command === 'blacklist') {
+else if (command === 'listblword') {
   if (!m.isGroup) return reply(mess.group);
   if (!isAdmins && !isOwner) return reply(mess.admin);
   const _blList = gsGet(m.chat).blacklist || [];
-  if (_blList.length === 0) return reply('📋 Belum ada kata dalam blacklist.\n\nGunakan: *' + prefix + 'addbl [kata]* untuk menambahkan.');
-  reply(`🚫 *BLACKLIST KATA*\n\n*Total: ${_blList.length} kata*\n\n${_blList.map((w,i) => `${i+1}. \`${w}\``).join('\n')}\n\n_Hapus dengan: ${prefix}delbl [kata]_`);
+  if (_blList.length === 0) return reply('Belum ada kata dalam blacklist.');
+  reply(`*BLACKLIST KATA*\n\n${_blList.map((w,i) => `${i+1}. \`${w}\``).join('\n')}`);
 }
 else if (command === 'clearbl' || command === 'clearblacklist') {
   if (!m.isGroup) return reply(mess.group);
   if (!isAdmins && !isOwner) return reply(mess.admin);
   gsSet(m.chat, { blacklist: [] });
-  reply('✅ *Semua blacklist kata berhasil dihapus!*');
+  reply('Semua blacklist kata berhasil dihapus.');
+}
+else if (command === 'setmc' || command === 'setmcserver') {
+  if (!isOwner && !isCreator && !isAdmins) return reply(mess.admin);
+  const _mcMod = require('./lib/mcStatus');
+  if (!text) {
+    const _cur = _mcMod.getMcConfig();
+    return reply(
+      `*KONFIGURASI MINECRAFT SERVER*\n\n` +
+      `Panel URL: *${_cur.pteroPanelUrl || 'Belum diatur'}*\n` +
+      `Client API Key: *${_cur.pteroApiKey ? (_cur.pteroApiKey.slice(0, 12) + '...') : 'Belum diatur'}*\n` +
+      `Server ID: *${_cur.pteroServerId || 'Auto-Detect'}*\n` +
+      `Host IP:Port: *${_cur.host ? (_cur.host + ':' + _cur.port) : 'Auto dari Panel'}*\n\n` +
+      `*Cara Mengatur via Pterodactyl API (Rekomendasi):*\n` +
+      `*${prefix}setmc https://panel.domainmu.com*\n` +
+      `atau jika ingin mengganti API Key juga:\n` +
+      `*${prefix}setmc https://panel.domainmu.com ptlc_xxxx [server_id]*\n\n` +
+      `*Cara Mengatur via IP / RCON:*\n` +
+      `*${prefix}setmc play.evertalemc.id:25565 [rcon_port] [rcon_pass]*`
+    );
+  }
+  const _parts = text.trim().split(/\s+/);
+  const _first = _parts[0] || '';
+  const _second = _parts[1] || '';
+  const _third = _parts[2] || '';
+
+  // Detect if user passed a Panel URL or a ptlc_ key
+  if (/^https?:\/\//i.test(_first) || /^panel\./i.test(_first) || /\/server\//i.test(_first) || /^ptlc_/i.test(_first) || /^ptlc_/i.test(_second)) {
+    let _rawUrl = _first;
+    let _apiKey = _mcMod.getMcConfig().pteroApiKey || '';
+    let _srvId = '';
+
+    if (/^ptlc_/i.test(_first)) {
+      _apiKey = _first;
+      _rawUrl = _second || _mcMod.getMcConfig().pteroPanelUrl || '';
+      _srvId = _third || '';
+    } else {
+      if (/^ptlc_/i.test(_second)) {
+        _apiKey = _second;
+        _srvId = _third || '';
+      } else if (_second) {
+        _srvId = _second;
+      }
+    }
+
+    const _parsed = _mcMod.parsePanelInput(_rawUrl);
+    const _saved = _mcMod.saveMcConfig({
+      pteroPanelUrl: _parsed.panelUrl || _mcMod.getMcConfig().pteroPanelUrl,
+      pteroApiKey: _apiKey,
+      pteroServerId: _srvId || _parsed.serverId || ''
+    });
+
+    return reply(
+      `*KONFIGURASI PTERODACTYL MC TERSIMPAN*\n\n` +
+      `Panel URL: *${_saved.pteroPanelUrl || 'Belum diatur'}*\n` +
+      `Client API Key: *${_saved.pteroApiKey ? (_saved.pteroApiKey.slice(0, 14) + '...') : 'Belum diatur'}*\n` +
+      `Server ID: *${_saved.pteroServerId || 'Auto-Detect'}*\n\n` +
+      `Ketik *${prefix}mcstatus* atau *${prefix}tps* untuk mengambil data live TPS, Player Online, dan Resource Server.`
+    );
+  }
+
+  const [_hostPart, _portPart] = _first.split(':');
+  const _rconPort = _second ? Number(_second) : 25575;
+  const _rconPass = _third || '';
+  const _srvName = _parts.slice(3).join(' ') || 'EvertaleMC';
+  const _saved = _mcMod.saveMcConfig({
+    host: _hostPart,
+    port: _portPart ? Number(_portPart) : 25565,
+    rconPort: _rconPort || 25575,
+    rconPassword: _rconPass,
+    serverName: _srvName
+  });
+  reply(
+    `*KONFIGURASI MC TERSIMPAN*\n\n` +
+    `Nama Server: *${_saved.serverName}*\n` +
+    `Address: *${_saved.host}:${_saved.port}*\n` +
+    `RCON Port: *${_saved.rconPort}*\n` +
+    `RCON Password: *${_saved.rconPassword ? 'Aktif (Siap untuk /spark tps)' : 'Tidak diatur'}*\n\n` +
+    `Ketik *${prefix}mcstatus* atau *${prefix}tps* untuk mengecek status server.`
+  );
+}
+else if (command === 'mcstatus' || command === 'servermc' || command === 'mc' || command === 'tps') {
+  await Cantarella.sendMessage(m.chat, { react: { text: '⚡', key: m.key } });
+  const _mcMod = require('./lib/mcStatus');
+  let _customCfg = null;
+  if (text && text.trim()) {
+    const _arg = text.trim().split(/\s+/)[0];
+    const _base = _mcMod.getMcConfig();
+    if (/^https?:\/\//i.test(_arg) || /^panel\./i.test(_arg) || /\/server\//i.test(_arg)) {
+      const _parsed = _mcMod.parsePanelInput(_arg);
+      _customCfg = _mcMod.saveMcConfig({
+        pteroPanelUrl: _parsed.panelUrl,
+        pteroServerId: _parsed.serverId || _base.pteroServerId
+      });
+    } else {
+      const [_h, _p] = _arg.split(':');
+      _customCfg = {
+        ..._base,
+        host: _h,
+        port: _p ? Number(_p) : 25565,
+        serverName: _h
+      };
+    }
+  }
+  const _cfgToUse = _customCfg || _mcMod.getMcConfig();
+  if (!_cfgToUse.host && !_cfgToUse.pteroPanelUrl) {
+    return reply(
+      `URL Panel Pterodactyl atau IP Server Minecraft belum diatur.\n\n` +
+      `API Key \`${_cfgToUse.pteroApiKey ? _cfgToUse.pteroApiKey.slice(0, 12) + '...' : 'ptlc_...'}\` sudah tersimpan.\n` +
+      `Cukup masukkan URL Panel tempat server MC berada:\n` +
+      `*${prefix}setmc https://panel.domainhostingmu.com*`
+    );
+  }
+  const _st = await _mcMod.queryFullMcStatus(_cfgToUse);
+  const _botFoot = global.namaBot || 'Ender Verstappen';
+  const _dispAddr = _cfgToUse.host || _st.host || 'evertalemc.id';
+  const _dispPort = _cfgToUse.port || _st.port || 19005;
+
+  if (_st.pteroError && !_st.online) {
+    Cantarella.sendMessage(m.chat, { react: { text: '❌', key: m.key } });
+    return reply(
+      `╔═ 𝗦𝗧𝗔𝗧𝗨𝗦 𝗦𝗘𝗥𝗩𝗘𝗥 𝗠𝗜𝗡𝗘𝗖𝗥𝗔𝗙𝗧 ✦\n` +
+      `║ » Server    : *${_st.serverName || 'EvertaleMC'}*\n` +
+      `║ » Address   : *${_dispAddr}*\n` +
+      `║ » Port      : *${_dispPort}*\n` +
+      `║ » Status    : *Error*\n` +
+      `║ » Info      : \`${_st.pteroError}\`\n` +
+      `╚═════ ${_botFoot}`
+    );
+  }
+  if (!_st.online) {
+    Cantarella.sendMessage(m.chat, { react: { text: '❌', key: m.key } });
+    return reply(
+      `╔═ 𝗦𝗧𝗔𝗧𝗨𝗦 𝗦𝗘𝗥𝗩𝗘𝗥 𝗠𝗜𝗡𝗘𝗖𝗥𝗔𝗙𝗧 ✦\n` +
+      `║ » Server    : *${_st.serverName}*\n` +
+      `║ » Address   : *${_dispAddr}*\n` +
+      `║ » Port      : *${_dispPort}*\n` +
+      `║ » Status    : *Offline*\n` +
+      `╚═════ ${_botFoot}`
+    );
+  }
+
+  let _hwBlock = '';
+  if (_st.ptero && _st.ptero.resources) {
+    const _r = _st.ptero.resources;
+    const _l = _st.ptero.limits || {};
+    const _ramMb = (_r.memoryBytes / (1024 * 1024)).toFixed(0);
+    const _ramLim = _l.memory ? `${_l.memory} MB` : 'Unlimited';
+    const _diskMb = (_r.diskBytes / (1024 * 1024)).toFixed(0);
+    const _cpu = (_r.cpuAbsolute || 0).toFixed(1);
+    const _upSec = Math.floor((_r.uptimeMs || 0) / 1000);
+    const _upD = Math.floor(_upSec / 86400);
+    const _upH = Math.floor((_upSec % 86400) / 3600);
+    const _upM = Math.floor((_upSec % 3600) / 60);
+    const _upS = _upSec % 60;
+    const _upStr = (_upD > 0 ? `${_upD}d ` : '') + `${_upH}h ${_upM}m ${_upS}s`;
+    _hwBlock =
+      `\n╔═ 𝗥𝗘𝗦𝗢𝗨𝗥𝗖𝗘 𝗦𝗘𝗥𝗩𝗘𝗥 ✦\n` +
+      `║ » Uptime    : *${_upStr}*\n` +
+      `║ » CPU Load  : *${_cpu}%${_l.cpu ? ` / ${_l.cpu}%` : ''}*\n` +
+      `║ » Memory    : *${_ramMb} / ${_ramLim}*\n` +
+      `║ » Disk      : *${_diskMb} MB*\n` +
+      `╚═════\n`;
+  }
+
+  const _tpsVal = _st.tpsValues || (_st.sparkTps ? _st.sparkTps.split('\n')[0] : '-');
+  const _tpsBlock =
+    `\n╔═ TPS from last 5s, 10s, 1m, 5m, 15m: ✦\n` +
+    `║ » ${_tpsVal}\n` +
+    `╚═════\n`;
+
+  const _pListLines = (_st.playersByRank && _st.playersByRank.length > 0)
+    ? _st.playersByRank.map(r => `║ » ${r.rank.padEnd(9, ' ')} : *${r.members}*`).join('\n')
+    : ((_st.playersList && _st.playersList.length > 0)
+        ? _st.playersList.map((p, i) => `║ » ${i + 1}. *${p}*`).join('\n')
+        : '║ » _Tidak ada player online_');
+
+  const _mcText =
+    `╔═ 𝗦𝗧𝗔𝗧𝗨𝗦 𝗦𝗘𝗥𝗩𝗘𝗥 𝗠𝗜𝗡𝗘𝗖𝗥𝗔𝗙𝗧 ✦\n` +
+    `║ » Server    : *${_st.serverName}*\n` +
+    `║ » Address   : *${_dispAddr}*\n` +
+    `║ » Port      : *${_dispPort}*\n` +
+    `║ » Status    : *Online (${_st.latencyMs ? _st.latencyMs + 'ms' : 'Running'})*\n` +
+    `║ » Version   : *${_st.version}*\n` +
+    `║ » Players   : *${_st.playersOnline}/${_st.playersMax} Online*\n` +
+    `╚═════\n` +
+    _hwBlock +
+    _tpsBlock +
+    `\n╔═ 𝗟𝗜𝗦𝗧 𝗣𝗟𝗔𝗬𝗘𝗥 (${_st.playersOnline}) ✦\n` +
+    `${_pListLines}\n` +
+    `╚═════ ${_botFoot}`;
+
+  await reply(_mcText);
+  Cantarella.sendMessage(m.chat, { react: { text: '✅', key: m.key } });
 }
 
 else if (command === 'addautoreply' || command === 'addar') {
