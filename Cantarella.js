@@ -31953,13 +31953,13 @@ else if (command === 'setmc' || command === 'setmcserver') {
       `Client API Key: *${_cur.pteroApiKey ? (_cur.pteroApiKey.slice(0, 12) + '...') : 'Belum diatur'}*\n` +
       `Server ID: *${_cur.pteroServerId || 'Auto-Detect'}*\n` +
       `Host IP:Port: *${_cur.host ? (_cur.host + ':' + _cur.port) : 'Auto dari Panel'}*\n` +
-      `Versi (ViaVersion): *${_cur.version || '1.8.x - 1.21.x'}*\n\n` +
+      `Versi (ViaVersion): *${_cur.version || '1.8.x - latest'}*\n\n` +
       `*Cara Mengatur via Pterodactyl API (Rekomendasi):*\n` +
       `*${prefix}setmc https://panel.domainmu.com*\n` +
       `atau jika ingin mengganti API Key juga:\n` +
       `*${prefix}setmc https://panel.domainmu.com ptlc_xxxx [server_id]*\n\n` +
       `*Cara Mengatur Versi ViaVersion:*\n` +
-      `*${prefix}setmc version 1.8.x - 1.21.x*\n\n` +
+      `*${prefix}setmc version 1.8.x - latest*\n\n` +
       `*Cara Mengatur via IP / RCON:*\n` +
       `*${prefix}setmc play.evertalemc.id:25565 [rcon_port] [rcon_pass]*`
     );
