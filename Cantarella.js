@@ -7700,7 +7700,7 @@ if (m.isGroup && isBotAdmins && !isOwner && !isCreator) {
     }
   }
 
-  if (Object.keys(_gs2.autoreply||{}).length > 0 && body) {
+  if (!_gs2.adminonly && Object.keys(_gs2.autoreply||{}).length > 0 && body) {
     const _arTxt = body.toLowerCase().trim();
     for (const [kw, resp] of Object.entries(_gs2.autoreply)) {
       if (_arTxt === kw.toLowerCase() || _arTxt.includes(kw.toLowerCase())) {
@@ -7710,6 +7710,14 @@ if (m.isGroup && isBotAdmins && !isOwner && !isCreator) {
     }
   }
 
+}
+
+// ── Mode Admin-Only Grup (Hanya merespons Admin & Owner di grup ini) ──
+if (m.isGroup && !isAdmins && !isOwner && !isCreator) {
+  const _aoGs = gsGet(m.chat);
+  if (_aoGs && _aoGs.adminonly) {
+    return;
+  }
 }
 
 if (global.autotyping) {
@@ -17707,7 +17715,7 @@ const _iaText = _ia.map(p => `  • @${(p.id||p.jid).split('@')[0]}`).join('\n')
 const _igd = groupMetadata.creation ? new Date(groupMetadata.creation*1000).toLocaleDateString('id-ID',{day:'numeric',month:'long',year:'numeric'}) : '?';
 const _igs = gsGet(m.chat);
 await Cantarella.sendMessage(m.chat, {
-  text: `📋 *INFO GRUP*\n\n📌 *Nama:* ${groupMetadata.subject||'-'}\n🆔 *ID:* \`${m.chat}\`\n👥 *Total Member:* ${participants.length} orang\n👑 *Total Admin:* ${_ia.length} orang\n📅 *Dibuat:* ${_igd}\n📝 *Deskripsi:* ${groupMetadata.desc||'_Tidak ada_'}\n\n*🔧 Pengaturan:*\n• Chat: ${groupMetadata.announce?'🔒 Hanya Admin':'🔓 Semua Member'}\n• Edit Info: ${groupMetadata.restrict?'🔒 Hanya Admin':'🔓 Semua Member'}\n\n*🛡️ Fitur Aktif:*\n${_igs.antilink?'✅':'❌'} Anti-Link  |  ${_igs.antilinkWA?'✅':'❌'} Anti WA-Link\n${_igs.antiimage?'✅':'❌'} Anti-Gambar  |  ${_igs.antivideo?'✅':'❌'} Anti-Video\n${_igs.antisticker?'✅':'❌'} Anti-Stiker  |  ${_igs.antidocument?'✅':'❌'} Anti-Dokumen\n${_igs.antitoxic?'✅':'❌'} Anti-Toxic (Max Warn: ${_igs.maxWarn||3}x)\n${_igs.antispam?'✅':'❌'} Anti-Spam (Max: ${_igs.spamMax||50}x/10dtk)\n${_igs.antivortex?'✅':'❌'} Anti-Vortex/Virus Text\n${_igs.welcome?'✅':'❌'} Welcome  |  ${_igs.leave?'✅':'❌'} Goodbye\n\n*👑 Daftar Admin:*\n${_iaText}`,
+  text: `📋 *INFO GRUP*\n\n📌 *Nama:* ${groupMetadata.subject||'-'}\n🆔 *ID:* \`${m.chat}\`\n👥 *Total Member:* ${participants.length} orang\n👑 *Total Admin:* ${_ia.length} orang\n📅 *Dibuat:* ${_igd}\n📝 *Deskripsi:* ${groupMetadata.desc||'_Tidak ada_'}\n\n*🔧 Pengaturan:*\n• Chat: ${groupMetadata.announce?'🔒 Hanya Admin':'🔓 Semua Member'}\n• Edit Info: ${groupMetadata.restrict?'🔒 Hanya Admin':'🔓 Semua Member'}\n\n*🛡️ Fitur Aktif:*\n${_igs.adminonly?'✅':'❌'} Admin-Only  |  ${_igs.antilink?'✅':'❌'} Anti-Link\n${_igs.antilinkWA?'✅':'❌'} Anti WA-Link  |  ${_igs.antiimage?'✅':'❌'} Anti-Gambar  |  ${_igs.antivideo?'✅':'❌'} Anti-Video\n${_igs.antisticker?'✅':'❌'} Anti-Stiker  |  ${_igs.antidocument?'✅':'❌'} Anti-Dokumen\n${_igs.antitoxic?'✅':'❌'} Anti-Toxic (Max Warn: ${_igs.maxWarn||3}x)\n${_igs.antispam?'✅':'❌'} Anti-Spam (Max: ${_igs.spamMax||50}x/10dtk)\n${_igs.antivortex?'✅':'❌'} Anti-Vortex/Virus Text\n${_igs.welcome?'✅':'❌'} Welcome  |  ${_igs.leave?'✅':'❌'} Goodbye\n\n*👑 Daftar Admin:*\n${_iaText}`,
   mentions: _iaJids
 }, { quoted: fakeQuoted });
 }
@@ -30932,6 +30940,29 @@ else if (command === 'grouplock' || command === 'lockgroup') {
       footer: `${global.namaBot} • Group Lock`,
       buttons: _glBtns, headerType: 1
     }, { quoted: fakeQuoted });
+  }
+}
+
+else if (command === 'adminonly' || command === 'onlyadmin') {
+  if (!m.isGroup) return reply(mess.group);
+  if (!isAdmins && !isOwner && !isCreator) return reply(mess.admin);
+  const _aoAct = (text || '').toLowerCase().trim();
+  const _aoData = gsGet(m.chat);
+  if (_aoAct === 'on' || _aoAct === 'aktif' || _aoAct === 'enable' || _aoAct === '1') {
+    gsKey(m.chat, 'adminonly', true);
+    return reply('Mode Admin-Only diaktifkan.\nBot hanya akan merespons pesan dan perintah dari Admin dan Owner di grup ini.');
+  } else if (_aoAct === 'off' || _aoAct === 'nonaktif' || _aoAct === 'disable' || _aoAct === 'mati' || _aoAct === '0') {
+    gsKey(m.chat, 'adminonly', false);
+    return reply('Mode Admin-Only dinonaktifkan.\nBot kembali merespons semua anggota di grup ini.');
+  } else {
+    const _isAo = Boolean(_aoData.adminonly);
+    return reply(
+      `Status Admin-Only: ${_isAo ? 'Aktif' : 'Nonaktif'}\n\n` +
+      `Gunakan perintah:\n` +
+      `• ${prefix}adminonly on — Mengaktifkan mode Admin-Only\n` +
+      `• ${prefix}adminonly off — Menonaktifkan mode Admin-Only\n\n` +
+      `Saat aktif, bot hanya merespons Admin dan Owner di grup ini. Anggota biasa tidak akan direspon oleh bot.`
+    );
   }
 }
 
