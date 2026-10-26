@@ -1,9 +1,13 @@
 require("./Cantarella")
 const fs = require('fs')
+const path = require('path')
 
 // Load environment variables from .env if exists
-if (fs.existsSync('./.env')) {
-    const envLines = fs.readFileSync('./.env', 'utf8').split('\n');
+const envPath = fs.existsSync(path.resolve(__dirname, '.env')) 
+    ? path.resolve(__dirname, '.env') 
+    : (fs.existsSync('./.env') ? './.env' : null);
+if (envPath) {
+    const envLines = fs.readFileSync(envPath, 'utf8').split('\n');
     for (const line of envLines) {
         const trimmed = line.trim();
         if (!trimmed || trimmed.startsWith('#')) continue;
@@ -38,13 +42,13 @@ global.linkGc = "https://chat.whatsapp.com/CyqYBNPiYyNLZruhCKtsWl" //LINK GROUP 
 global.welcomeBg = './assets/banner.jpg'
 //UBAH SESUKA LO
 global.mess = {
-    owner: "You are not owner",
-    prem: "You are not premium",
-    group: "Only group command",
-    admin: "You are not Admin",
-    botadmin: "Bot Harus Jadi Admin",
-    private: "Only Private Chat",
-    done: "Done"
+    owner: "Akses ditolak: Perintah khusus Owner.",
+    prem: "Akses ditolak: Fitur khusus pengguna Premium.",
+    group: "Perintah ini hanya dapat digunakan di dalam grup.",
+    admin: "Akses ditolak: Perintah khusus Admin grup.",
+    botadmin: "Bot memerlukan hak akses Admin untuk menjalankan perintah ini.",
+    private: "Perintah ini hanya dapat digunakan melalui Private Chat.",
+    done: "Selesai"
 }
 //===BAGIAN STORE UNTUK PAYMENT GETWA =====
 global.midtransServerKey = '';

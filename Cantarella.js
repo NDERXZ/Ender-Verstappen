@@ -9162,12 +9162,11 @@ if (m.isGroup && !isOwner && !isCreator && _SEC && isBotAdmins) {
             try { await Cantarella.sendMessage(m.chat, { delete: m.key }); } catch {}
             return;
         }
-        try { await Cantarella.sendMessage(m.chat, { delete: m.key }); } catch {}
+        if (!_secResult.actions.includes('permission_denied')) {
+            try { await Cantarella.sendMessage(m.chat, { delete: m.key }); } catch {}
+        }
         if (_secResult.reason) {
-            await Cantarella.sendMessage(m.chat, {
-                text: `${_secResult.reason}\n👤 @${m.sender.split('@')[0]}`,
-                mentions: [m.sender]
-            });
+            await reply(_secResult.reason);
         }
         return;
     }
@@ -9175,10 +9174,7 @@ if (m.isGroup && !isOwner && !isCreator && _SEC && isBotAdmins) {
     if (_secResult.warnings.length) {
         for (const w of _secResult.warnings) {
             if (w.includes('Data sensitif') || w.includes('phishing') || w.includes('berbahaya')) {
-                await Cantarella.sendMessage(m.chat, {
-                    text: `⚠️ ${w}\n👤 @${m.sender.split('@')[0]}`,
-                    mentions: [m.sender]
-                });
+                await reply(`Peringatan: ${w.replace(/^[⚠️🔒🤖🔄📡👤]\s*/, '')}`);
             }
         }
     }

@@ -2331,6 +2331,12 @@ global.stopWebBotSession = async (phoneInput, deleteFiles = true) => {
 if (!global._STARTS_CALLED) {
     global._STARTS_CALLED = true;
     startWebServer();
+    try {
+        const { initEvertaleBridge } = require('./lib/evertaleReportBridge');
+        initEvertaleBridge();
+    } catch (e) {
+        console.error('[EvertaleBridge] Load error:', e.message);
+    }
     Starts().catch((e) => {
         console.error('[Starts] Fatal error:', e?.message || e);
         setTimeout(() => { global._STARTS_CALLED = false; Starts().catch(() => {}); }, 5000);
