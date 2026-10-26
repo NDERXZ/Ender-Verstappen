@@ -169,7 +169,7 @@ When prompted in the terminal, enter your phone number to receive the pairing co
 
 Once active, trigger commands using prefixes like `.`, `/`, or `#`:
 
-### 🎵 Interactive Media Players
+### Interactive Media Players
 * **YouTube Player**:
   ```text
   .ytp faded alan walker
@@ -186,7 +186,7 @@ Once active, trigger commands using prefixes like `.`, `/`, or `#`:
   .soundcloud https://soundcloud.com/alanwalker/faded
   ```
 
-### 🧠 AI Assistant & General Commands
+### AI Assistant & General Commands
 * **Chat with AI**:
   ```text
   .ai jelaskan teori relativitas secara sederhana
