@@ -17715,7 +17715,7 @@ const _iaText = _ia.map(p => `  • @${(p.id||p.jid).split('@')[0]}`).join('\n')
 const _igd = groupMetadata.creation ? new Date(groupMetadata.creation*1000).toLocaleDateString('id-ID',{day:'numeric',month:'long',year:'numeric'}) : '?';
 const _igs = gsGet(m.chat);
 await Cantarella.sendMessage(m.chat, {
-  text: `📋 *INFO GRUP*\n\n📌 *Nama:* ${groupMetadata.subject||'-'}\n🆔 *ID:* \`${m.chat}\`\n👥 *Total Member:* ${participants.length} orang\n👑 *Total Admin:* ${_ia.length} orang\n📅 *Dibuat:* ${_igd}\n📝 *Deskripsi:* ${groupMetadata.desc||'_Tidak ada_'}\n\n*🔧 Pengaturan:*\n• Chat: ${groupMetadata.announce?'🔒 Hanya Admin':'🔓 Semua Member'}\n• Edit Info: ${groupMetadata.restrict?'🔒 Hanya Admin':'🔓 Semua Member'}\n\n*🛡️ Fitur Aktif:*\n${_igs.adminonly?'✅':'❌'} Admin-Only  |  ${_igs.antilink?'✅':'❌'} Anti-Link\n${_igs.antilinkWA?'✅':'❌'} Anti WA-Link  |  ${_igs.antiimage?'✅':'❌'} Anti-Gambar  |  ${_igs.antivideo?'✅':'❌'} Anti-Video\n${_igs.antisticker?'✅':'❌'} Anti-Stiker  |  ${_igs.antidocument?'✅':'❌'} Anti-Dokumen\n${_igs.antitoxic?'✅':'❌'} Anti-Toxic (Max Warn: ${_igs.maxWarn||3}x)\n${_igs.antispam?'✅':'❌'} Anti-Spam (Max: ${_igs.spamMax||50}x/10dtk)\n${_igs.antivortex?'✅':'❌'} Anti-Vortex/Virus Text\n${_igs.welcome?'✅':'❌'} Welcome  |  ${_igs.leave?'✅':'❌'} Goodbye\n\n*👑 Daftar Admin:*\n${_iaText}`,
+  text: `📋 *INFO GRUP*\n\n📌 *Nama:* ${groupMetadata.subject||'-'}\n🆔 *ID:* \`${m.chat}\`\n👥 *Total Member:* ${participants.length} orang\n👑 *Total Admin:* ${_ia.length} orang\n📅 *Dibuat:* ${_igd}\n📝 *Deskripsi:* ${groupMetadata.desc||'_Tidak ada_'}\n\n*🔧 Pengaturan:*\n• Chat: ${groupMetadata.announce?'🔒 Hanya Admin':'🔓 Semua Member'}\n• Edit Info: ${groupMetadata.restrict?'🔒 Hanya Admin':'🔓 Semua Member'}\n\n*🛡️ Fitur Aktif:*\n${_igs.adminonly?'✅':'❌'} Admin-Only  |  ${_igs.autombg?'✅':'❌'} Auto-MBG  |  ${_igs.antilink?'✅':'❌'} Anti-Link\n${_igs.antilinkWA?'✅':'❌'} Anti WA-Link  |  ${_igs.antiimage?'✅':'❌'} Anti-Gambar  |  ${_igs.antivideo?'✅':'❌'} Anti-Video\n${_igs.antisticker?'✅':'❌'} Anti-Stiker  |  ${_igs.antidocument?'✅':'❌'} Anti-Dokumen\n${_igs.antitoxic?'✅':'❌'} Anti-Toxic (Max Warn: ${_igs.maxWarn||3}x)\n${_igs.antispam?'✅':'❌'} Anti-Spam (Max: ${_igs.spamMax||50}x/10dtk)\n${_igs.antivortex?'✅':'❌'} Anti-Vortex/Virus Text\n${_igs.welcome?'✅':'❌'} Welcome  |  ${_igs.leave?'✅':'❌'} Goodbye\n\n*👑 Daftar Admin:*\n${_iaText}`,
   mentions: _iaJids
 }, { quoted: fakeQuoted });
 }
@@ -30963,6 +30963,65 @@ else if (command === 'adminonly' || command === 'onlyadmin') {
       `• ${prefix}adminonly off — Menonaktifkan mode Admin-Only\n\n` +
       `Saat aktif, bot hanya merespons Admin dan Owner di grup ini. Anggota biasa tidak akan direspon oleh bot.`
     );
+  }
+}
+
+else if (command === 'autombg') {
+  if (!m.isGroup) return reply(mess.group);
+  if (!isAdmins && !isOwner && !isCreator) return reply(mess.admin);
+  const _mbgAct = (text || '').toLowerCase().trim();
+  const _mbgData = gsGet(m.chat);
+  if (_mbgAct === 'on' || _mbgAct === 'aktif' || _mbgAct === 'enable' || _mbgAct === '1') {
+    gsKey(m.chat, 'autombg', true);
+    return reply('Fitur Auto-MBG diaktifkan.\nInformasi postingan menu MBG terbaru dari @sppg_maguwoharjo3 akan otomatis dikirimkan ke grup ini.');
+  } else if (_mbgAct === 'off' || _mbgAct === 'nonaktif' || _mbgAct === 'disable' || _mbgAct === 'mati' || _mbgAct === '0') {
+    gsKey(m.chat, 'autombg', false);
+    return reply('Fitur Auto-MBG dinonaktifkan.');
+  } else {
+    const _isMbgOn = Boolean(_mbgData.autombg);
+    return reply(
+      `Status Auto-MBG: ${_isMbgOn ? 'Aktif' : 'Nonaktif'}\n\n` +
+      `Gunakan perintah:\n` +
+      `• ${prefix}autombg on — Mengaktifkan pengiriman otomatis info MBG\n` +
+      `• ${prefix}autombg off — Menonaktifkan pengiriman otomatis info MBG\n` +
+      `• ${prefix}mbg — Mengecek menu/info MBG hari ini secara manual\n\n` +
+      `Sumber: @sppg_maguwoharjo3 (konten video/reels otomatis difilter).`
+    );
+  }
+}
+
+else if (command === 'mbg') {
+  await reply('Mengambil data menu MBG hari ini...');
+  try {
+    const { fetchMbgPosts, formatMbgCaption } = require('./lib/mbgWatcher');
+    const posts = await fetchMbgPosts();
+    if (!posts || posts.length === 0) {
+      return reply('Tidak ada informasi postingan foto MBG yang ditemukan saat ini.');
+    }
+    const latest = posts[0];
+    const caption = formatMbgCaption(latest);
+    if (latest.images && latest.images[0]) {
+      return await Cantarella.sendMessage(m.chat, {
+        image: { url: latest.images[0] },
+        caption: caption
+      }, { quoted: m });
+    } else {
+      return reply(caption);
+    }
+  } catch (err) {
+    return reply(`Gagal memuat info MBG: ${err.message}`);
+  }
+}
+
+else if (command === 'testmbg') {
+  if (!isOwner && !isCreator) return reply(mess.owner);
+  await reply('Mengirimkan test postingan MBG ke nomor WhatsApp Owner...');
+  try {
+    const { testMbgToOwner } = require('./lib/mbgWatcher');
+    const res = await testMbgToOwner(Cantarella);
+    return reply(`Test postingan MBG berhasil dikirimkan ke nomor Owner (${res.ownerJid}).`);
+  } catch (err) {
+    return reply(`Gagal mengirimkan test MBG: ${err.message}`);
   }
 }
 

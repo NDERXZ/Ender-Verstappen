@@ -300,7 +300,7 @@ async function Starts(opts = {}) {
         state.creds.pairingCode = undefined;
     }
 
-    let cleanPhone = normalizePhone(opts.phone || (isMain ? (global._CACHED_PAIR_PHONE || state.creds?.me?.id?.split(':')[0]?.split('@')[0] || '') : path.basename(sessionDir)));
+    let cleanPhone = normalizePhone(opts.phone || (isMain ? (global._CACHED_PAIR_PHONE || state.creds?.me?.id?.split(':')[0]?.split('@')[0] || global.nobot || '') : path.basename(sessionDir)));
     if (isMain && usePairingCode && !state.creds.registered && !state.creds.account) {
         if (!cleanPhone) {
             const rawAns = await question(`\n\x1b[38;5;135m┌── PAIRING SETUP ───────────────────────────┐\x1b[0m\n\x1b[38;5;135m│\x1b[0m Masukkan nomor WhatsApp bot (contoh: 628xx)\n\x1b[38;5;135m└────────────────────────────────────────────┘\x1b[0m\n➜ Nomor : `);
@@ -1599,6 +1599,18 @@ try {
                 }
             }, 30000);
         }
+
+        // Auto-MBG Watcher (setiap 10 menit untuk grup dengan autombg on)
+        if (isMain && !sessMeta._mbgInterval) {
+            try {
+                const { watcherMbg } = require('./lib/mbgWatcher');
+                sessMeta._mbgInterval = setInterval(() => {
+                    watcherMbg(Cantarella).catch(e => console.error('[MBG Poller]', e.message));
+                }, 10 * 60 * 1000);
+            } catch (e) {
+                console.error('[MBG Watcher Init]', e.message);
+            }
+        }
     }
 
     if (connection === 'close') {
@@ -1606,6 +1618,7 @@ try {
         sessMeta.status = 'RECONNECTING';
         if (isMain) _L.setStatus('RECONNECTING');
         if (showroomIntervalId) { clearInterval(showroomIntervalId); showroomIntervalId = null; }
+        if (sessMeta._mbgInterval) { clearInterval(sessMeta._mbgInterval); sessMeta._mbgInterval = null; }
         const code   = lastDisconnect?.error?.output?.statusCode
                     || lastDisconnect?.error?.statusCode
                     || DisconnectReason.connectionClosed;
