@@ -30991,9 +30991,8 @@ else if (command === 'autombg') {
 }
 
 else if (command === 'mbg') {
-  await reply('Mengambil data menu MBG hari ini...');
   try {
-    const { fetchMbgPosts, formatMbgCaption } = require('./lib/mbgWatcher');
+    const { fetchMbgPosts, formatMbgCaption, markMbgAsSent } = require('./lib/mbgWatcher');
     const posts = await fetchMbgPosts();
     if (!posts || posts.length === 0) {
       return reply('Tidak ada informasi postingan foto MBG yang ditemukan saat ini.');
@@ -31001,13 +31000,15 @@ else if (command === 'mbg') {
     const latest = posts[0];
     const caption = formatMbgCaption(latest);
     if (latest.images && latest.images[0]) {
-      return await Cantarella.sendMessage(m.chat, {
+      await Cantarella.sendMessage(m.chat, {
         image: { url: latest.images[0] },
         caption: caption
       }, { quoted: m });
     } else {
-      return reply(caption);
+      await reply(caption);
     }
+    // Tandai agar tidak dikirim ulang secara otomatis oleh autombg ke grup ini
+    markMbgAsSent(latest.id, m.chat);
   } catch (err) {
     return reply(`Gagal memuat info MBG: ${err.message}`);
   }
