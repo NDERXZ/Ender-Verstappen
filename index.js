@@ -311,6 +311,14 @@ async function Starts(opts = {}) {
     if (!cleanPhone && isMain) cleanPhone = normalizePhone(global.nobot || '');
 
     const existingMeta = global._BOT_SESSIONS.get(cleanPhone) || {};
+    if (existingMeta && existingMeta.sock) {
+        try {
+            existingMeta.sock.ev.removeAllListeners();
+            if (existingMeta.sock.ws) existingMeta.sock.ws.close();
+            if (typeof existingMeta.sock.end === 'function') existingMeta.sock.end();
+        } catch {}
+        existingMeta.sock = null;
+    }
     const sessMeta = {
         phone: cleanPhone || 'main',
         isMain,
@@ -1615,6 +1623,10 @@ try {
 
     if (connection === 'close') {
         if (sessMeta.stoppedManually) return;
+        if (sessMeta.sock && sessMeta.sock !== Cantarella) {
+            try { Cantarella.ev.removeAllListeners(); } catch {}
+            return;
+        }
         sessMeta.status = 'RECONNECTING';
         if (isMain) _L.setStatus('RECONNECTING');
         if (showroomIntervalId) { clearInterval(showroomIntervalId); showroomIntervalId = null; }
@@ -1624,13 +1636,14 @@ try {
                     || DisconnectReason.connectionClosed;
         const reason = lastDisconnect?.error?.message || String(code);
         const _reconnectOpts = { sessionDir, phone: cleanPhone, customCode: sessMeta.customCode };
+        const _delay = (code === 440 || code === DisconnectReason.connectionReplaced) ? 10000 : 2500;
         if (_AB && isMain) {
             _AB.healthRecordDisconnect(reason);
             _AB.reconnectGuard(reason);
             if (code !== DisconnectReason.loggedOut) {
-                setTimeout(() => { if (!sessMeta.stoppedManually) try { Starts(_reconnectOpts); } catch {} }, 1500);
+                setTimeout(() => { if (!sessMeta.stoppedManually) try { Starts(_reconnectOpts); } catch {} }, _delay);
             } else if (!Cantarella.authState.creds.registered && !Cantarella.authState.creds.account) {
-                setTimeout(() => { if (!sessMeta.stoppedManually) try { Starts(_reconnectOpts); } catch {} }, 1500);
+                setTimeout(() => { if (!sessMeta.stoppedManually) try { Starts(_reconnectOpts); } catch {} }, _delay);
             } else {
                 sessMeta.status = 'LOGGED_OUT';
                 console.log('\x1b[31m❌ Bot logout terdeteksi\x1b[0m');
@@ -1639,9 +1652,9 @@ try {
             }
         } else {
             if (code !== DisconnectReason.loggedOut) {
-                setTimeout(() => { if (!sessMeta.stoppedManually) try { Starts(_reconnectOpts); } catch {} }, 1500);
+                setTimeout(() => { if (!sessMeta.stoppedManually) try { Starts(_reconnectOpts); } catch {} }, _delay);
             } else if (!Cantarella.authState.creds.registered && !Cantarella.authState.creds.account) {
-                setTimeout(() => { if (!sessMeta.stoppedManually) try { Starts(_reconnectOpts); } catch {} }, 1500);
+                setTimeout(() => { if (!sessMeta.stoppedManually) try { Starts(_reconnectOpts); } catch {} }, _delay);
             } else {
                 sessMeta.status = 'LOGGED_OUT';
                 console.log(`\x1b[31m❌ Sesi ${cleanPhone} logout terdeteksi\x1b[0m`);
