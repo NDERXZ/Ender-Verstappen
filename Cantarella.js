@@ -13524,7 +13524,7 @@ case 'smeme':
 case 'meme':
 case 'stickermeme':
 case 'makememe': {
-    if (!text) return reply(`Format: ${prefix + command} TEKS ATAS|TEKS BAWAH\nContoh: ${prefix}smeme LO PILIH DIEM|ATAU GUE SAYANG?`)
+    if (!text) return reply(`Format: ${prefix + command} TEKS BAWAH|TEKS ATAS\nContoh: ${prefix}smeme GUE SAYANG|LO PILIH DIEM?`)
 
     let media = null, mime = ''
     if (m.quoted?.mimetype)               { mime = m.quoted.mimetype; media = await m.quoted.download() }
@@ -13561,8 +13561,8 @@ case 'makememe': {
         }
 
         const parts      = text.split('|')
-        const topText    = (parts[0] || '').trim().toUpperCase()
-        const bottomText = (parts[1] || '').trim().toUpperCase()
+        const bottomText = (parts[0] || '').trim().toUpperCase()
+        const topText    = (parts[1] || '').trim().toUpperCase()
         if (!topText && !bottomText) return reply('❌ Teks tidak boleh kosong semua!')
 
         const img    = await loadImage(imgBuf)
