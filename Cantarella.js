@@ -24257,7 +24257,7 @@ case 'bratvid': case 'bratvideo': {
     const teks = rawTeks.split(/\s+/);
     if (!teks.length || !rawTeks) return reply('❌ Teks tidak boleh kosong!');
 
-    const words = teks.slice(0, 20);
+    const words = teks.slice(0, 10);
     const tempDir = path.join(process.cwd(), 'temp');
     if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
 
@@ -24290,7 +24290,7 @@ case 'bratvid': case 'bratvideo': {
         fileListContent += `file '${framePaths[framePaths.length - 1].replace(/\\/g, '/')}'\n`;
         fs.writeFileSync(fileListPath, fileListContent);
 
-        execSync(`ffmpeg -y -f concat -safe 0 -i "${fileListPath}" -vf "scale=512:512:force_original_aspect_ratio=decrease,pad=512:512:-1:-1:color=white,fps=15" -c:v libwebp -loop 0 -an -vsync vfr "${outputStickerPath}"`);
+        execSync(`ffmpeg -y -f concat -safe 0 -i "${fileListPath}" -vf "scale=512:512:force_original_aspect_ratio=decrease,pad=512:512:-1:-1:color=white,fps=15" -c:v libwebp -loop 0 -an -fps_mode vfr "${outputStickerPath}"`, { stdio: 'ignore', timeout: 60000 });
 
         const packname = global.packname || global.namaBot || 'Ender Verstappen';
         const author = global.author || global.namaowner || 'Chaidar';
