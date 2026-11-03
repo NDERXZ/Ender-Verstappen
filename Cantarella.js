@@ -24228,25 +24228,26 @@ case 'code': {
 case 'brat': {
     await Cantarella.sendMessage(m.chat, { react: { text: '⏳', key: m.key } });
 
-    if (!text) return reply(
+    if (!text && (!m.quoted || !m.quoted.text)) return reply(
         `* BRAT GENERATOR*\n\n` +
         ` *Cara Pakai:*\n${prefix}brat <teks>\n\n` +
         ` *Contoh:*\n${prefix}brat hallo world\n${prefix}brat i'm so brat`
     );
 
+    const input = (text || m.quoted.text || '').trim();
+
     try {
         delete require.cache[require.resolve('./lib/canvas/brat')];
-        const { generateBrat } = require('./lib/canvas/brat');
-        const buffer = await generateBrat(text);
+        const { generateBratWebp } = require('./lib/canvas/brat');
+        const packname = global.packname || global.namaBot || 'Ender Verstappen';
+        const author   = global.author   || global.namaowner || 'Chaidar';
+        const stickerBuffer = await generateBratWebp(input, { packname, author });
 
-        await Cantarella.sendImageAsSticker(m.chat, buffer, m, {
-            packname: global.packname || global.namaBot,
-            author:   global.author  || global.namaowner
-        });
-
+        await Cantarella.sendMessage(m.chat, { sticker: stickerBuffer }, { quoted: m });
         await Cantarella.sendMessage(m.chat, { react: { text: '✅', key: m.key } });
 
     } catch (e) {
+        console.error('[brat error]', e);
         await Cantarella.sendMessage(m.chat, { react: { text: '❌', key: m.key } });
         reply(`❌ *Brat gagal:* ${e.message}`);
     }
@@ -24254,66 +24255,27 @@ case 'brat': {
 }
 case 'bratvid': case 'bratvideo': {
     if (!text && (!m.quoted || !m.quoted.text)) return reply(`Kirim/reply pesan *${prefix + command}* Teksnya`);
-    const rawTeks = (m.quoted ? m.quoted.text : text).trim();
-    const teks = rawTeks.split(/\s+/);
-    if (!teks.length || !rawTeks) return reply('❌ Teks tidak boleh kosong!');
-
-    const words = teks.slice(0, 10);
-    const tempDir = path.join(process.cwd(), 'temp');
-    if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
+    const input = (m.quoted ? m.quoted.text : text).trim();
+    if (!input) return reply('❌ Teks tidak boleh kosong!');
 
     await Cantarella.sendMessage(m.chat, { react: { text: '⏳', key: m.key } });
 
-    const prefixId = `${Date.now()}_${Math.random().toString(36).substring(7)}`;
-    const framePaths = [];
-    const fileListPath = path.join(tempDir, `${prefixId}.txt`);
-    const outputStickerPath = path.join(tempDir, `${prefixId}_bratvid.webp`);
-
     try {
         delete require.cache[require.resolve('./lib/canvas/brat')];
-        const { generateBrat } = require('./lib/canvas/brat');
-        const { addExif } = require('./lib/exif');
-
-        for (let i = 0; i < words.length; i++) {
-            const currentText = words.slice(0, i + 1).join(' ');
-            const frameBuf = await generateBrat(currentText);
-            const framePath = path.join(tempDir, `${prefixId}_${i}.png`);
-            fs.writeFileSync(framePath, frameBuf);
-            framePaths.push(framePath);
-        }
-
-        let fileListContent = '';
-        for (let i = 0; i < framePaths.length; i++) {
-            fileListContent += `file '${framePaths[i].replace(/\\/g, '/')}'\n`;
-            fileListContent += `duration 0.4\n`;
-        }
-        fileListContent += `file '${framePaths[framePaths.length - 1].replace(/\\/g, '/')}'\n`;
-        fileListContent += `duration 2.5\n`;
-        fileListContent += `file '${framePaths[framePaths.length - 1].replace(/\\/g, '/')}'\n`;
-        fs.writeFileSync(fileListPath, fileListContent);
-
-        execSync(`ffmpeg -y -f concat -safe 0 -i "${fileListPath}" -vf "scale=512:512:force_original_aspect_ratio=decrease,pad=512:512:-1:-1:color=white,fps=15" -c:v libwebp -loop 0 -an -fps_mode vfr "${outputStickerPath}"`, { stdio: 'ignore', timeout: 60000 });
-
+        const { generateBratVidWebp } = require('./lib/canvas/brat');
         const packname = global.packname || global.namaBot || 'Ender Verstappen';
-        const author = global.author || global.namaowner || 'Chaidar';
+        const author   = global.author   || global.namaowner || 'Chaidar';
+        const stickerBuffer = await generateBratVidWebp(input, { packname, author });
 
-        let webpBuf = fs.readFileSync(outputStickerPath);
-        try {
-            webpBuf = await addExif(webpBuf, packname, author, ['🤖']);
-        } catch {}
-
-        await Cantarella.sendMessage(m.chat, { sticker: webpBuf }, { quoted: m });
+        await Cantarella.sendMessage(m.chat, { sticker: stickerBuffer }, { quoted: m });
         await Cantarella.sendMessage(m.chat, { react: { text: '✅', key: m.key } });
 
     } catch (e) {
         console.error('[bratvid error]', e);
         await Cantarella.sendMessage(m.chat, { react: { text: '❌', key: m.key } });
         reply('❌ Terjadi kesalahan saat memproses bratvid: ' + e.message);
-    } finally {
-        framePaths.forEach(f => { try { fs.unlinkSync(f); } catch {} });
-        try { fs.unlinkSync(fileListPath); } catch {}
-        try { fs.unlinkSync(outputStickerPath); } catch {}
     }
+    break;
 }
 break
 case 'furbrat': {
