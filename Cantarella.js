@@ -24235,6 +24235,7 @@ case 'brat': {
     );
 
     try {
+        delete require.cache[require.resolve('./lib/canvas/brat')];
         const { generateBrat } = require('./lib/canvas/brat');
         const buffer = await generateBrat(text);
 
@@ -24269,6 +24270,7 @@ case 'bratvid': case 'bratvideo': {
     const outputStickerPath = path.join(tempDir, `${prefixId}_bratvid.webp`);
 
     try {
+        delete require.cache[require.resolve('./lib/canvas/brat')];
         const { generateBrat } = require('./lib/canvas/brat');
         const { addExif } = require('./lib/exif');
 
