@@ -13640,6 +13640,118 @@ case 'makememe': {
     }
 }
 break;
+
+case 'burikin':
+case 'burik':
+case 'lowres':
+case 'pixelate': {
+    let media = null;
+    let targetMime = '';
+
+    const q = m.quoted ? m.quoted : null;
+    if (q && (q.mimetype || q.msg?.mimetype)) {
+        targetMime = q.mimetype || q.msg?.mimetype || '';
+        try {
+            media = await (q.download ? q.download() : Cantarella.downloadMediaMessage(q));
+        } catch (e) {
+            console.error('[burikin quoted download error]', e);
+        }
+    } else {
+        const selfMime = m.mimetype || m.msg?.mimetype || (m.mtype === 'imageMessage' ? 'image/jpeg' : m.mtype === 'videoMessage' ? 'video/mp4' : m.mtype === 'stickerMessage' ? 'image/webp' : '');
+        if (selfMime) {
+            targetMime = selfMime;
+            try {
+                media = await (m.download ? m.download() : Cantarella.downloadMediaMessage(m));
+            } catch (e) {
+                try {
+                    media = await Cantarella.downloadMediaMessage(m.msg || m);
+                } catch (e2) {
+                    console.error('[burikin direct download error]', e2);
+                }
+            }
+        }
+    }
+
+    if (!media) {
+        return reply(
+            `📉 *BURIKIN (LOWER RESOLUTION)*\n\n` +
+            `> Turunkan resolusi foto atau video menjadi sangat rendah (144p / 3GP potato quality).\n\n` +
+            `📌 *Cara Pakai:*\n` +
+            `• Kirim foto/video dengan caption *${prefix + command}*\n` +
+            `• Reply foto/video/sticker dengan *${prefix + command}*\n` +
+            `• Custom level burik: *${prefix + command} <angka>*\n\n` +
+            `💡 *Contoh:*\n` +
+            `• *${prefix + command}*\n` +
+            `• *${prefix + command} 5* (Sedikit burik)\n` +
+            `• *${prefix + command} 20* (Sangat burik)`
+        );
+    }
+
+    const isImg = /image/.test(targetMime) || /webp/.test(targetMime);
+    const isVid = /video/.test(targetMime);
+
+    if (!isImg && !isVid) {
+        return reply('❌ Format tidak didukung! Kirim atau reply foto/gambar atau video.');
+    }
+
+    let level = 10;
+    const parsedLevel = parseInt(text || args[0]);
+    if (!isNaN(parsedLevel) && parsedLevel >= 2) {
+        level = Math.min(parsedLevel, 50);
+    }
+
+    await Cantarella.sendMessage(m.chat, { react: { text: '⏳', key: m.key } });
+
+    const tempDir = path.join(process.cwd(), 'temp');
+    if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
+
+    const prefixId = `burik_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const tmpIn  = path.join(tempDir, `${prefixId}_in${isVid ? '.mp4' : '.png'}`);
+    const tmpOut = path.join(tempDir, `${prefixId}_out${isVid ? '.mp4' : '.jpg'}`);
+
+    fs.writeFileSync(tmpIn, media);
+
+    try {
+        if (isVid) {
+            // Video: downscale width & height, reduce fps, drop bitrate, crush audio
+            execSync(
+                `ffmpeg -y -i "${tmpIn}" -vf "scale=max(32\\,trunc(iw/${level}/2)*2):max(32\\,trunc(ih/${level}/2)*2):flags=neighbor,scale=trunc(iw/2)*2:trunc(ih/2)*2:flags=neighbor,fps=12" -c:v libx264 -preset ultrafast -b:v 25k -maxrate 40k -bufsize 50k -pix_fmt yuv420p -c:a aac -b:a 16k -ar 11025 -ac 1 -movflags +faststart "${tmpOut}"`,
+                { stdio: 'ignore', timeout: 120000 }
+            );
+
+            const outBuf = fs.readFileSync(tmpOut);
+            await Cantarella.sendMessage(m.chat, {
+                video: outBuf,
+                mimetype: 'video/mp4',
+                caption: `📉 *Video Berhasil Diburikin!*\n📊 *Level:* ${level}\n🔥 *Kualitas:* 3GP / 144p Nokia Potato Audio`
+            }, { quoted: m });
+        } else {
+            // Image: downscale & upscale with neighbor, max jpeg compression
+            execSync(
+                `ffmpeg -y -i "${tmpIn}" -vf "scale=max(16\\,trunc(iw/${level}/2)*2):max(16\\,trunc(ih/${level}/2)*2):flags=neighbor,scale=trunc(iw/2)*2:trunc(ih/2)*2:flags=neighbor" -q:v 31 -update 1 "${tmpOut}"`,
+                { stdio: 'ignore', timeout: 60000 }
+            );
+
+            const outBuf = fs.readFileSync(tmpOut);
+            await Cantarella.sendMessage(m.chat, {
+                image: outBuf,
+                caption: `📉 *Foto Berhasil Diburikin!*\n📊 *Level:* ${level}\n🔥 *Kualitas:* 144p Burik Potato`
+            }, { quoted: m });
+        }
+
+        await Cantarella.sendMessage(m.chat, { react: { text: '✅', key: m.key } });
+
+    } catch (err) {
+        console.error('[burikin error]', err);
+        await Cantarella.sendMessage(m.chat, { react: { text: '❌', key: m.key } });
+        reply('❌ Gagal memproses media: ' + (err.message || err));
+    } finally {
+        try { fs.unlinkSync(tmpIn); } catch {}
+        try { fs.unlinkSync(tmpOut); } catch {}
+    }
+    break;
+}
+
 case 'supportbot': {
 let name = pushname || Cantarella.getName(m.sender);
 let pan = `༄.ᐟ ʜᴇʟʟᴏ ᴋᴀᴋ \`${name}\`
@@ -17038,7 +17150,7 @@ case 'mcat': {
         },
         canvas: {
             emoji:'🖼️', label:'CANVAS', desc:'Efek gambar & fake generator',
-            cmds:[['wanted','wantedposter'],['wasted','gta'],['jail','penjara'],['ektp','ktp'],['fakediscord','fakedc']]
+            cmds:[['wanted','wantedposter'],['wasted','gta'],['jail','penjara'],['ektp','ktp'],['fakediscord','fakedc'],['burikin','burik','lowres']]
         },
         ephoto: {
             emoji:'✨', label:'EPHOTO', desc:'Efek teks dari ephoto360.com',
