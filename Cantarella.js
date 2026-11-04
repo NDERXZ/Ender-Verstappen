@@ -13674,16 +13674,13 @@ case 'pixelate': {
 
     if (!media) {
         return reply(
-            `📉 *BURIKIN (LOWER RESOLUTION)*\n\n` +
-            `> Turunkan resolusi foto atau video menjadi sangat rendah (144p / 3GP potato quality).\n\n` +
-            `📌 *Cara Pakai:*\n` +
-            `• Kirim foto/video dengan caption *${prefix + command}*\n` +
-            `• Reply foto/video/sticker dengan *${prefix + command}*\n` +
-            `• Custom level burik: *${prefix + command} <angka>*\n\n` +
-            `💡 *Contoh:*\n` +
-            `• *${prefix + command}*\n` +
-            `• *${prefix + command} 5* (Sedikit burik)\n` +
-            `• *${prefix + command} 20* (Sangat burik)`
+            '╔═ 𝗕𝗨𝗥𝗜𝗞𝗜𝗡 ✦\n' +
+            '║ » Fungsi    : Menurunkan resolusi foto atau video\n' +
+            '║ » Format    : Kirim/reply foto atau video\n' +
+            '║ » Syntax    : *' + prefix + command + '* [level]\n' +
+            '║ » Contoh    : *' + prefix + command + '*\n' +
+            '║ » Default   : *Level 3*\n' +
+            '╚═════ ' + (global.namaBot || 'Ender Verstappen')
         );
     }
 
@@ -13691,10 +13688,10 @@ case 'pixelate': {
     const isVid = /video/.test(targetMime);
 
     if (!isImg && !isVid) {
-        return reply('❌ Format tidak didukung! Kirim atau reply foto/gambar atau video.');
+        return reply('❌ Format tidak didukung. Harap kirim atau reply foto/gambar atau video.');
     }
 
-    let level = 10;
+    let level = 3;
     const parsedLevel = parseInt(text || args[0]);
     if (!isNaN(parsedLevel) && parsedLevel >= 2) {
         level = Math.min(parsedLevel, 50);
@@ -13720,10 +13717,18 @@ case 'pixelate': {
             );
 
             const outBuf = fs.readFileSync(tmpOut);
+            const captionText =
+                '╔═ 𝗠𝗘𝗗𝗜𝗔 𝗗𝗢𝗪𝗡𝗦𝗖𝗔𝗟𝗘 ✦\n' +
+                '║ » Status    : *Success*\n' +
+                '║ » Tipe      : *Video*\n' +
+                '║ » Level     : *' + level + '*\n' +
+                '║ » Output    : *Low-Resolution (3GP)*\n' +
+                '╚═════ ' + (global.namaBot || 'Ender Verstappen');
+
             await Cantarella.sendMessage(m.chat, {
                 video: outBuf,
                 mimetype: 'video/mp4',
-                caption: `📉 *Video Berhasil Diburikin!*\n📊 *Level:* ${level}\n🔥 *Kualitas:* 3GP / 144p Nokia Potato Audio`
+                caption: captionText
             }, { quoted: m });
         } else {
             // Image: downscale & upscale with neighbor, max jpeg compression
@@ -13733,9 +13738,17 @@ case 'pixelate': {
             );
 
             const outBuf = fs.readFileSync(tmpOut);
+            const captionText =
+                '╔═ 𝗠𝗘𝗗𝗜𝗔 𝗗𝗢𝗪𝗡𝗦𝗖𝗔𝗟𝗘 ✦\n' +
+                '║ » Status    : *Success*\n' +
+                '║ » Tipe      : *Foto*\n' +
+                '║ » Level     : *' + level + '*\n' +
+                '║ » Output    : *Low-Resolution (144p)*\n' +
+                '╚═════ ' + (global.namaBot || 'Ender Verstappen');
+
             await Cantarella.sendMessage(m.chat, {
                 image: outBuf,
-                caption: `📉 *Foto Berhasil Diburikin!*\n📊 *Level:* ${level}\n🔥 *Kualitas:* 144p Burik Potato`
+                caption: captionText
             }, { quoted: m });
         }
 
