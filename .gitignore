@@ -36,9 +36,18 @@ temp/
 *.zip
 ender_verstappen/
 BACA INI
+bin/
 
 # OS and Editor files
 .DS_Store
 Thumbs.db
 .vscode/
 .idea/
+
+# Binary executables
+bin/
+*.exe
+
+# Binary executables
+bin/
+*.exe

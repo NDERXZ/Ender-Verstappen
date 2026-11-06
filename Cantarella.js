@@ -21890,7 +21890,7 @@ case 'yta':
   try {
     const { getYoutubeDownload } = require('./lib/scrape/youtube_dl');
     const ytData = await getYoutubeDownload(text, 'mp3');
-    if (!ytData || !ytData.download_url) return reply('❌ Gagal mengunduh audio YouTube: ' + (ytData?.message || 'Server sibuk'));
+    if (!ytData || (!ytData.download_url && !ytData.buffer)) return reply('❌ Gagal mengunduh audio YouTube: ' + (ytData?.message || 'Server sibuk'));
 
     const audioUrl = ytData.download_url;
     const title    = ytData.title    || 'YouTube Audio';
@@ -21914,7 +21914,7 @@ case 'yta':
     const { createYtmp3Thumb } = require('./lib/canvas/ytmp3Thumb');
 
     const [audioRes, canvasBuf] = await Promise.all([
-      axios.get(audioUrl, {
+      ytData.buffer ? Promise.resolve({ data: ytData.buffer }) : axios.get(audioUrl, {
         responseType: 'arraybuffer',
         headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
       }),
@@ -21991,19 +21991,24 @@ break
     const { getYoutubeDownload } = require('./lib/scrape/youtube_dl');
     const ytDl = await getYoutubeDownload(ytUrl, quality);
 
-    if (!ytDl || !ytDl.download_url) {
+    if (!ytDl || (!ytDl.download_url && !ytDl.buffer)) {
       return reply('❌ Gagal mengunduh video YouTube: ' + (ytDl?.message || 'Server sibuk'));
     }
 
     await Cantarella.sendMessage(m.chat, { react: { text: '⏬', key: m.key } });
 
     const title = ytDl.title || 'YouTube Video';
-    const videoRes = await axios.get(ytDl.download_url, {
-      responseType: 'arraybuffer',
-      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
-      timeout: 120000
-    });
-    const videoBuffer = Buffer.from(videoRes.data);
+    let videoBuffer;
+    if (ytDl.buffer) {
+      videoBuffer = ytDl.buffer;
+    } else {
+      const videoRes = await axios.get(ytDl.download_url, {
+        responseType: 'arraybuffer',
+        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+        timeout: 120000
+      });
+      videoBuffer = Buffer.from(videoRes.data);
+    }
 
     await Cantarella.sendMessage(m.chat, {
       video: videoBuffer,
@@ -22345,20 +22350,24 @@ _Sedang mengunduh dan mengirim audio MP3, mohon tunggu sebentar..._`;
     const { getYoutubeDownload } = require('./lib/scrape/youtube_dl');
     const ytData = await getYoutubeDownload(url, 'mp3');
 
-    if (!ytData || !ytData.download_url) {
+    if (!ytData || (!ytData.download_url && !ytData.buffer)) {
       await Cantarella.sendMessage(m.chat, { react: { text: '❌', key: m.key } });
       return reply('❌ Gagal mengunduh audio YouTube: ' + (ytData?.message || 'Server sedang sibuk'));
     }
 
-    const audioRes = await axios.get(ytData.download_url, {
-      responseType: 'arraybuffer',
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-      },
-      timeout: 90000
-    });
-
-    const audioBuffer = Buffer.from(audioRes.data);
+    let audioBuffer;
+    if (ytData.buffer) {
+      audioBuffer = ytData.buffer;
+    } else {
+      const audioRes = await axios.get(ytData.download_url, {
+        responseType: 'arraybuffer',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        },
+        timeout: 90000
+      });
+      audioBuffer = Buffer.from(audioRes.data);
+    }
 
     // Kirim HANYA audio langsung tanpa externalAdReply agar langsung terkirim (tidak centang satu)
     await Cantarella.sendMessage(m.chat, {
