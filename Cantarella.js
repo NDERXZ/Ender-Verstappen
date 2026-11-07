@@ -28605,26 +28605,63 @@ case 'upswgc': {
 
     Cantarella.sendMessage(m.chat, { react: { text: '⏳', key: m.key } });
 
-    const _swqSrc     = m.quoted ? m.quoted : null;
-    const _swqMime    = _swqSrc ? ((_swqSrc.msg || _swqSrc).mimetype || '') : '';
-    const _swCaption  = (text || '').trim();
-    const _swIsImg    = /image/.test(_swqMime);
-    const _swIsVid    = /video/.test(_swqMime);
-    const _swIsAud    = /audio/.test(_swqMime);
-    const _swHasMedia = _swIsImg || _swIsVid || _swIsAud;
+    const _isAll = (args[0] || '').toLowerCase() === 'all';
+    const _swCaption = _isAll ? args.slice(1).join(' ').trim() : (text || '').trim();
+
+    let _swBuf = null;
+    let _swMime = '';
+    const _q = m.quoted ? m.quoted : null;
+
+    // 1. Cek media dari pesan yang di-reply
+    if (_q && (_q.mimetype || _q.msg?.mimetype || /image|video|audio/.test(_q.mtype || ''))) {
+        _swMime = _q.mimetype || _q.msg?.mimetype || (_q.mtype === 'imageMessage' ? 'image/jpeg' : _q.mtype === 'videoMessage' ? 'video/mp4' : _q.mtype === 'audioMessage' ? 'audio/mp4' : '');
+        try {
+            _swBuf = await (_q.download ? _q.download() : Cantarella.downloadMediaMessage(_q));
+        } catch (e) {
+            try {
+                _swBuf = await Cantarella.downloadMediaMessage(_q.msg || _q);
+            } catch (e2) {}
+        }
+    }
+
+    // 2. Jika tidak ada di reply, cek apakah user langsung mengirim media dengan caption command
+    if (!_swBuf || !_swBuf.length) {
+        const _selfMime = m.mimetype || m.msg?.mimetype || (m.mtype === 'imageMessage' ? 'image/jpeg' : m.mtype === 'videoMessage' ? 'video/mp4' : m.mtype === 'audioMessage' ? 'audio/mp4' : '');
+        if (_selfMime) {
+            _swMime = _selfMime;
+            try {
+                _swBuf = await (m.download ? m.download() : Cantarella.downloadMediaMessage(m));
+            } catch (e) {
+                try {
+                    _swBuf = await Cantarella.downloadMediaMessage(m.msg || m);
+                } catch (e2) {}
+            }
+        }
+    }
+
+    const _swIsImg    = /image/.test(_swMime);
+    const _swIsVid    = /video/.test(_swMime);
+    const _swIsAud    = /audio/.test(_swMime);
+    const _intendedMedia = _swIsImg || _swIsVid || _swIsAud;
+    const _swHasMedia = _intendedMedia && Buffer.isBuffer(_swBuf) && _swBuf.length > 0;
+
+    if (_intendedMedia && !_swHasMedia) {
+        Cantarella.sendMessage(m.chat, { react: { text: '❌', key: m.key } });
+        return reply('❌ Gagal mengunduh media dari pesan tersebut. Pastikan media masih tersedia dan coba lagi.');
+    }
 
     if (!_swHasMedia && !_swCaption) {
         Cantarella.sendMessage(m.chat, { react: { text: '❓', key: m.key } });
         return reply(
-            `📢 *sᴡɪᴛᴄʜ ɢʀᴏᴜᴘ ᴄᴏᴠᴇʀ ᴍᴜʟᴛɪ*\n\n` +
+            `📢 *sᴡɪᴛᴄʜ ɢʀᴏᴜᴘ ᴄᴏᴠᴇʀ (ꜱᴡɢᴄ)*\n\n` +
             `╔═ 📋 *ᴄᴀʀᴀ ᴘᴀᴋᴀɪ* ✦\n` +
-            `║ » Reply gambar/video + \`${prefix}swgc\`\n` +
-            `║ » Reply audio + \`${prefix}swgc\`\n` +
-            `║ » Kirim teks: \`${prefix}swgc <teks>\`\n` +
-            `║ » Pilih grup tujuan dari menu\n` +
-            `║ » Bisa kirim ke semua grup sekaligus\n` +
+            `║ » Kirim/reply gambar: \`${prefix}swgc [caption]\`\n` +
+            `║ » Kirim/reply video: \`${prefix}swgc [caption]\`\n` +
+            `║ » Reply audio: \`${prefix}swgc\`\n` +
+            `║ » Kirim teks status: \`${prefix}swgc <teks>\`\n` +
+            `║ » Kirim ke semua grup: \`${prefix}swgc all [caption]\`\n` +
             `╚═════\n\n` +
-            `_Powered by ${global.namaBot}_`
+            `_Status grup akan langsung dikirimkan ke grup ini._`
         );
     }
 
@@ -28633,27 +28670,128 @@ case 'upswgc': {
         return reply('❌ Audio tidak bisa disertai caption.');
     }
 
-    let _swBuf = null;
-    if (_swHasMedia) {
-        try {
-            _swBuf = await Cantarella.downloadMediaMessage(_swqSrc, 'buffer');
-            if (!_swBuf || !_swBuf.length) throw new Error('Buffer kosong');
-        } catch (_swDErr) {
-            Cantarella.sendMessage(m.chat, { react: { text: '❌', key: m.key } });
-            return reply(`❌ *Gagal mengunduh media!*\n\n> ${_swDErr.message.slice(0, 100)}`);
-        }
-    }
-
     const _swContent = {};
     if (_swIsImg)        { _swContent.type = 'image'; _swContent.buf = _swBuf; _swContent.caption = _swCaption; }
     else if (_swIsVid)   { _swContent.type = 'video'; _swContent.buf = _swBuf; _swContent.caption = _swCaption; }
     else if (_swIsAud)   { _swContent.type = 'audio'; _swContent.buf = _swBuf; }
     else                 { _swContent.type = 'text';  _swContent.text = _swCaption; }
 
+    const _swTypeLabel = {
+        image: `🖼️ Gambar${_swCaption ? ' + Caption' : ''}`,
+        video: `🎬 Video${_swCaption ? ' + Caption' : ''}`,
+        audio: '🎵 Audio',
+        text:  '📝 Teks'
+    }[_swContent.type];
+
+    const _buildPayload = () => {
+        const payload = {};
+        if (_swContent.type === 'image') {
+            payload.groupStatusMessage = { image: _swContent.buf, caption: _swContent.caption || '' };
+        } else if (_swContent.type === 'video') {
+            payload.groupStatusMessage = { video: _swContent.buf, caption: _swContent.caption || '' };
+        } else if (_swContent.type === 'audio') {
+            payload.groupStatusMessage = { audio: _swContent.buf, ptt: false };
+        } else {
+            payload.groupStatusMessage = { text: _swContent.text };
+        }
+        return payload;
+    };
+
+    // 1. Broadcast ke semua grup jika keyword 'all'
+    if (_isAll) {
+        let _swAllGroups = [];
+        try {
+            const _swFetch = await Cantarella.groupFetchAllParticipating();
+            _swAllGroups   = Object.values(_swFetch);
+        } catch (_swFErr) {
+            Cantarella.sendMessage(m.chat, { react: { text: '❌', key: m.key } });
+            return reply(`❌ Gagal mengambil daftar grup: ${_swFErr.message.slice(0, 80)}`);
+        }
+
+        if (!_swAllGroups.length) {
+            Cantarella.sendMessage(m.chat, { react: { text: '❌', key: m.key } });
+            return reply('❌ Bot tidak terdaftar di grup manapun!');
+        }
+
+        await m.reply(
+            `⏳ *Mengirim status ke ${_swAllGroups.length} grup...*\n\n` +
+            `_Harap tunggu, proses sedang berjalan..._`
+        );
+
+        let _swOk = 0, _swFail = 0;
+        for (const _g of _swAllGroups) {
+            try {
+                await Cantarella.sendMessage(_g.id, _buildPayload());
+                _swOk++;
+                await new Promise(r => setTimeout(r, 1200));
+            } catch (_err) {
+                console.error(`[SWGC all] Gagal ke ${_g.id}:`, _err.message);
+                _swFail++;
+            }
+        }
+
+        Cantarella.sendMessage(m.chat, { react: { text: _swOk > 0 ? '✅' : '❌', key: m.key } });
+        return reply(
+            `${_swOk > 0 ? '✅' : '❌'} *ʜᴀꜱɪʟ ꜱᴡɢᴄ ᴍᴜʟᴛɪ*\n\n` +
+            `╔═ 📊 *ʟᴀᴘᴏʀᴀɴ* ✦\n` +
+            `║ » Tipe: ${_swTypeLabel}\n` +
+            `║ » Berhasil: ${_swOk} grup ✅\n` +
+            `║ » Gagal: ${_swFail} grup ❌\n` +
+            `╚═════\n\n` +
+            `_Powered by ${global.namaBot}_`
+        );
+    }
+
+    // 2. Jika dipanggil di dalam grup -> Langsung kirim status grup ke grup ini!
+    if (m.isGroup) {
+        try {
+            await Cantarella.sendMessage(m.chat, _buildPayload());
+            Cantarella.sendMessage(m.chat, { react: { text: '✅', key: m.key } });
+            return reply(
+                `✅ *ꜱᴜᴋꜱᴇꜱ ᴜᴘʟᴏᴀᴅ ꜱᴛᴀᴛᴜꜱ ɢʀᴜᴘ*\n\n` +
+                `╔═ 📋 *ᴅᴇᴛᴀɪʟ* ✦\n` +
+                `║ » Target: ${groupName || 'Grup ini'}\n` +
+                `║ » Tipe: ${_swTypeLabel}\n` +
+                `${_swCaption ? `║ » Teks: ${_swCaption}\n` : ''}` +
+                `╚═════\n\n` +
+                `> Status grup berhasil dikirimkan ke grup ini!`
+            );
+        } catch (_swSendErr) {
+            console.error(`[SWGC] Gagal kirim ke ${m.chat}:`, _swSendErr);
+            Cantarella.sendMessage(m.chat, { react: { text: '❌', key: m.key } });
+            return reply(`❌ *Gagal mengirim status grup!*\n\n> ${_swSendErr.message.slice(0, 100)}`);
+        }
+    }
+
+    // 3. Jika di PC (Private Chat) dan menyebut ID grup (misal: 120363xxx@g.us)
+    const _targetGid = (args[0] || '').endsWith('@g.us') ? args[0] : null;
+    if (_targetGid) {
+        if (_swContent.type === 'image' || _swContent.type === 'video') {
+            _swContent.caption = args.slice(1).join(' ').trim();
+        } else if (_swContent.type === 'text') {
+            _swContent.text = args.slice(1).join(' ').trim();
+        }
+        try {
+            await Cantarella.sendMessage(_targetGid, _buildPayload());
+            Cantarella.sendMessage(m.chat, { react: { text: '✅', key: m.key } });
+            return reply(
+                `✅ *ꜱᴜᴋꜱᴇꜱ ᴜᴘʟᴏᴀᴅ ꜱᴛᴀᴛᴜꜱ ɢʀᴜᴘ*\n\n` +
+                `╔═ 📋 *ᴅᴇᴛᴀɪʟ* ✦\n` +
+                `║ » Target: ${_targetGid}\n` +
+                `║ » Tipe: ${_swTypeLabel}\n` +
+                `╚═════`
+            );
+        } catch (_swErr) {
+            Cantarella.sendMessage(m.chat, { react: { text: '❌', key: m.key } });
+            return reply(`❌ Gagal mengirim status grup: ${_swErr.message.slice(0, 100)}`);
+        }
+    }
+
+    // 4. Jika di PC tanpa parameter grup, siapkan session dan menu pemilihan grup
     let _swAllGroups;
     try {
-        const _swFetch   = await Cantarella.groupFetchAllParticipating();
-        _swAllGroups     = Object.values(_swFetch);
+        const _swFetch = await Cantarella.groupFetchAllParticipating();
+        _swAllGroups   = Object.values(_swFetch);
     } catch (_swFErr) {
         Cantarella.sendMessage(m.chat, { react: { text: '❌', key: m.key } });
         return reply(`❌ Gagal mengambil daftar grup: ${_swFErr.message.slice(0, 80)}`);
@@ -28665,7 +28803,7 @@ case 'upswgc': {
     }
 
     if (!global._SW_PENDING) global._SW_PENDING = new Map();
-    const _swSessionKey  = `${m.sender}_${Date.now()}`;
+    const _swSessionKey = `${m.sender}_${Date.now()}`;
     global._SW_PENDING.set(_swSessionKey, {
         content:   _swContent,
         groups:    _swAllGroups,
@@ -28676,7 +28814,6 @@ case 'upswgc': {
     setTimeout(() => { global._SW_PENDING.delete(_swSessionKey); }, 300000);
 
     const _swRows = [];
-
     _swRows.push({
         title:       '📢 Kirim ke SEMUA Grup',
         description: `${_swAllGroups.length} grup sekaligus`,
@@ -28693,15 +28830,7 @@ case 'upswgc': {
         });
     }
 
-    const _swTypeLabel = {
-        image: `🖼️ Gambar${_swCaption ? ' + Caption' : ''}`,
-        video: `🎬 Video${_swCaption ? ' + Caption' : ''}`,
-        audio: '🎵 Audio',
-        text:  '📝 Teks'
-    }[_swContent.type];
-
     const _swSections = [];
-
     _swSections.push({ title: '📢 Kirim Massal', rows: [_swRows[0]] });
 
     const _swChunk = 10;
@@ -28715,38 +28844,49 @@ case 'upswgc': {
         });
     }
 
-    const _swPickMsg = generateWAMessageFromContent(m.chat, {
-        viewOnceMessage: {
-            message: {
-                messageContextInfo: { deviceListMetadata: {}, deviceListMetadataVersion: 2 },
-                interactiveMessage: {
-                    body: {
-                        text:
-                            `📢 *sᴡɪᴛᴄʜ ɢʀᴏᴜᴘ ᴄᴏᴠᴇʀ ᴍᴜʟᴛɪ*\n\n` +
-                            `╔═ 📋 *ᴋᴏɴᴛᴇɴ* ✦\n` +
-                            `║ » Tipe: ${_swTypeLabel}\n` +
-                            `${_swCaption ? `║ » Teks: ${_swCaption.slice(0, 40)}${_swCaption.length > 40 ? '...' : ''}\n` : ''}` +
-                            `║ » Total grup: ${_swAllGroups.length}\n` +
-                            `╚═════\n\n` +
-                            `> Pilih grup tujuan dari menu di bawah.\n` +
-                            `> Sesi aktif *5 menit*.`
-                    },
-                    nativeFlowMessage: {
-                        buttons: [{
-                            name: 'single_select',
-                            buttonParamsJson: JSON.stringify({
-                                title: 'PILIH GRUP TUJUAN',
-                                sections: _swSections
-                            })
-                        }]
+    try {
+        const _swPickMsg = generateWAMessageFromContent(m.chat, {
+            viewOnceMessage: {
+                message: {
+                    messageContextInfo: { deviceListMetadata: {}, deviceListMetadataVersion: 2 },
+                    interactiveMessage: {
+                        body: {
+                            text:
+                                `📢 *sᴡɪᴛᴄʜ ɢʀᴏᴜᴘ ᴄᴏᴠᴇʀ ᴍᴜʟᴛɪ*\n\n` +
+                                `╔═ 📋 *ᴋᴏɴᴛᴇɴ* ✦\n` +
+                                `║ » Tipe: ${_swTypeLabel}\n` +
+                                `${_swCaption ? `║ » Teks: ${_swCaption.slice(0, 40)}${_swCaption.length > 40 ? '...' : ''}\n` : ''}` +
+                                `║ » Total grup: ${_swAllGroups.length}\n` +
+                                `╚═════\n\n` +
+                                `> Pilih grup tujuan dari menu di bawah.\n` +
+                                `> Atau gunakan: \`${prefix}swgc all\` untuk kirim ke semua grup.\n` +
+                                `> Sesi aktif *5 menit*.`
+                        },
+                        nativeFlowMessage: {
+                            buttons: [{
+                                name: 'single_select',
+                                buttonParamsJson: JSON.stringify({
+                                    title: 'PILIH GRUP TUJUAN',
+                                    sections: _swSections
+                                })
+                            }]
+                        }
                     }
                 }
             }
-        }
-    }, { quoted: m }, {});
+        }, { quoted: m }, {});
 
-    await Cantarella.relayMessage(_swPickMsg.key.remoteJid, _swPickMsg.message, { messageId: _swPickMsg.key.id });
-    Cantarella.sendMessage(m.chat, { react: { text: '✅', key: m.key } });
+        await Cantarella.relayMessage(_swPickMsg.key.remoteJid, _swPickMsg.message, { messageId: _swPickMsg.key.id });
+        Cantarella.sendMessage(m.chat, { react: { text: '✅', key: m.key } });
+    } catch (_btnErr) {
+        reply(
+            `📢 *ᴘɪʟɪʜ ɢʀᴏᴜᴘ ᴛᴜᴊᴜᴀɴ*\n\n` +
+            `Gunakan salah satu perintah berikut:\n` +
+            `• \`${prefix}swsend all ${_swSessionKey}\` (Semua grup)\n` +
+            `• Atau gunakan langsung di grup tujuan: \`${prefix}swgc\`\n` +
+            `• Atau di PC: \`${prefix}swgc <id_grup>@g.us\``
+        );
+    }
     break;
 }
 
