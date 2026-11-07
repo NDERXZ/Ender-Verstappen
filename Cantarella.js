@@ -22347,8 +22347,11 @@ _Sedang mengunduh dan mengirim audio MP3, mohon tunggu sebentar..._`;
 
     await Cantarella.sendMessage(m.chat, { react: { text: `⏬`, key: m.key } });
 
+    try { delete require.cache[require.resolve('./lib/scrape/youtube_dl')]; } catch {}
     const { getYoutubeDownload } = require('./lib/scrape/youtube_dl');
+    console.log('[Play] Memulai unduhan dengan yt-dlp untuk URL:', url);
     const ytData = await getYoutubeDownload(url, 'mp3');
+    console.log('[Play] Hasil unduhan:', ytData ? { status: ytData.status, hasBuffer: !!ytData.buffer, hasUrl: !!ytData.download_url } : null);
 
     if (!ytData || (!ytData.download_url && !ytData.buffer)) {
       await Cantarella.sendMessage(m.chat, { react: { text: '❌', key: m.key } });
@@ -22369,12 +22372,24 @@ _Sedang mengunduh dan mengirim audio MP3, mohon tunggu sebentar..._`;
       audioBuffer = Buffer.from(audioRes.data);
     }
 
-    // Kirim HANYA audio langsung tanpa externalAdReply agar langsung terkirim (tidak centang satu)
-    await Cantarella.sendMessage(m.chat, {
-      audio: audioBuffer,
-      mimetype: 'audio/mpeg',
-      fileName: `${title.replace(/[\/\\:*?"<>|]/g, '')}.mp3`
-    }, { quoted: m });
+    console.log('[Play] Mengirim audio ke chat:', m.chat, 'Ukuran:', audioBuffer.length, 'bytes');
+
+    try {
+      await Cantarella.sendMessage(m.chat, {
+        audio: audioBuffer,
+        mimetype: 'audio/mpeg',
+        fileName: `${title.replace(/[\/\\:*?"<>|]/g, '')}.mp3`
+      }, { quoted: m });
+      console.log('[Play] Audio berhasil terkirim!');
+    } catch (_sendAudioErr) {
+      console.warn('[Play] Gagal kirim sebagai audio biasa, fallback ke dokumen:', _sendAudioErr.message);
+      await Cantarella.sendMessage(m.chat, {
+        document: audioBuffer,
+        mimetype: 'audio/mpeg',
+        fileName: `${title.replace(/[\/\\:*?"<>|]/g, '')}.mp3`
+      }, { quoted: m });
+      console.log('[Play] Audio berhasil terkirim sebagai dokumen!');
+    }
 
     await Cantarella.sendMessage(m.chat, { react: { text: `✅`, key: m.key } });
 
