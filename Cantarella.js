@@ -5341,19 +5341,49 @@ function gsRemWL(gid, domain) { return _DB.gsRemWL(gid, domain); }
 const _SPAM_TRACKER = new Map();
 const _SPAM_GROUP_MUTED = new Map();
 
-function spamAdd(gid, uid) {
+function spamAdd(gid, uid, msgTimestamp) {
   const key = `${gid}:${uid}`;
   const now = Date.now();
   const WIN = 10000;
-  if (!_SPAM_TRACKER.has(key)) _SPAM_TRACKER.set(key, { timestamps: [], warnedAt: new Set() });
+  if (!_SPAM_TRACKER.has(key)) _SPAM_TRACKER.set(key, { timestamps: [], msgTimestamps: [], lastArrival: 0, warnedAt: new Set() });
   const e = _SPAM_TRACKER.get(key);
-  e.timestamps = e.timestamps.filter(t => now - t < WIN);
-  e.timestamps.push(now);
-  return e.timestamps.length;
+  const active = e.timestamps.filter(t => now - t < WIN);
+  
+  // Jika window sebelumnya sudah bersih (idle > WIN), reset status warnedAt
+  if (active.length === 0) {
+    e.warnedAt.clear();
+    e.msgTimestamps = [];
+  }
+  
+  // Deteksi album / burst upload (media dikirim bersamaan oleh WA client dengan jeda < 150ms atau server timestamp identik)
+  const isBurst = (msgTimestamp && e.msgTimestamps && e.msgTimestamps.includes(msgTimestamp)) ||
+                  (e.lastArrival > 0 && (now - e.lastArrival) < 150);
+  
+  e.lastArrival = now;
+  if (msgTimestamp) {
+    if (!Array.isArray(e.msgTimestamps)) e.msgTimestamps = [];
+    e.msgTimestamps.push(msgTimestamp);
+    if (e.msgTimestamps.length > 20) e.msgTimestamps.shift();
+  }
+
+  // Jika bagian dari album upload bersamaan, jangan hitung tiap foto sebagai pesan spam terpisah
+  if (isBurst && active.length > 0) {
+    e.timestamps = active;
+    return active.length;
+  }
+
+  active.push(now);
+  e.timestamps = active;
+  return active.length;
 }
 function spamReset(gid, uid) {
   const key = `${gid}:${uid}`;
-  if (_SPAM_TRACKER.has(key)) { _SPAM_TRACKER.get(key).timestamps = []; _SPAM_TRACKER.get(key).warnedAt = new Set(); }
+  if (_SPAM_TRACKER.has(key)) {
+    const e = _SPAM_TRACKER.get(key);
+    e.timestamps = [];
+    e.msgTimestamps = [];
+    e.warnedAt = new Set();
+  }
 }
 function spamResetGroup(gid) {
   for (const k of _SPAM_TRACKER.keys()) { if (k.startsWith(gid + ':')) _SPAM_TRACKER.delete(k); }
@@ -7502,11 +7532,15 @@ function _recordMissedInteraction(db, targetJid, senderJid, chatJid, type) {
   }
 
   if (_gs.antispam && !_isProtected) {
-    const _spCount = spamAdd(m.chat, m.sender);
+    const _ignoredMtypes = ['reactionMessage', 'protocolMessage', 'pollUpdateMessage', 'senderKeyDistributionMessage', 'messageContextInfo'];
+    if (m.mtype && _ignoredMtypes.includes(m.mtype)) return;
+
+    const _spMsgTs = m.messageTimestamp ? Number(m.messageTimestamp) : null;
+    const _spCount = spamAdd(m.chat, m.sender, _spMsgTs);
     const _spMax   = _gs.spamMax   || 50;
-    const _spWarn1 = _gs.spamWarn1 || 10;
-    const _spWarn2 = _gs.spamWarn2 || 25;
-    const _spWarn3 = _gs.spamWarn3 || 40;
+    const _spWarn1 = _gs.spamWarn1 || 15;
+    const _spWarn2 = _gs.spamWarn2 || 30;
+    const _spWarn3 = _gs.spamWarn3 || 45;
     const _warned  = spamGetWarnedAt(m.chat, m.sender);
     const _bar = (n, max) => '█'.repeat(Math.min(20, Math.floor(n/max*20))) + '░'.repeat(Math.max(0, 20 - Math.min(20, Math.floor(n/max*20))));
 
@@ -31922,9 +31956,9 @@ else if (command === 'setspammax') {
   if (!_ssmNum || _ssmNum < 5 || _ssmNum > 200) return reply(`❓ Masukkan angka 5–200!\nContoh: *${prefix}setspammax 50*`);
   gsSet(m.chat, {
     spamMax: _ssmNum,
-    spamWarn1: Math.floor(_ssmNum * 0.2),
-    spamWarn2: Math.floor(_ssmNum * 0.5),
-    spamWarn3: Math.floor(_ssmNum * 0.8),
+    spamWarn1: Math.floor(_ssmNum * 0.3),
+    spamWarn2: Math.floor(_ssmNum * 0.6),
+    spamWarn3: Math.floor(_ssmNum * 0.85),
   });
   const _nd = gsGet(m.chat);
   reply(`✅ *Batas spam diperbarui!*\n\n🚨 Max (mute grup): *${_ssmNum}x*\n🟡 Warn 1 (auto): *${_nd.spamWarn1}x*\n🟠 Warn 2 (auto): *${_nd.spamWarn2}x*\n🔴 Final warn (auto): *${_nd.spamWarn3}x*\n\n_Threshold warning disesuaikan proporsional._`);

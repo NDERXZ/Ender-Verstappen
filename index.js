@@ -425,15 +425,7 @@ async function Starts(opts = {}) {
         try {
             const mek = chatUpdate.messages[0]
             if (!mek.message) return
-            const _rlSender = (mek.key.participant || mek.key.remoteJid || '').split('@')[0];
-            const _rlIsOwner = (Array.isArray(global.owner) ? global.owner : [String(global.owner || '')]).map(n => n.replace(/[^0-9]/g,'')).includes(_rlSender);
-            if (!_rlIsOwner && global._RL && mek.key && !mek.key.fromMe) {
-                const _rlCmd = (() => { try { const _b = (mek.message?.conversation || mek.message?.extendedTextMessage?.text || '').trim(); if (_b && global.prefix) { const _pfx = Array.isArray(global.prefix) ? global.prefix : [String(global.prefix)]; const _p = _pfx.find(p => _b.startsWith(p)); if (_p) return _b.slice(_p.length).trim().split(/\s+/)[0].toLowerCase(); } } catch {} return ''; })();
-                if (_rlCmd) {
-                    const _rlRes = global._RL.checkRateLimit((mek.key.participant || mek.key.remoteJid || ''), _rlCmd, false);
-                    if (_rlRes.blocked) return;
-                }
-            }
+            // Command rate limit dipusatkan di Cantarella.js (menghindari double increment)
             mek.message = (Object.keys(mek.message)[0] === 'ephemeralMessage') ? mek.message.ephemeralMessage.message : mek.message
             if (mek.key && mek.key.remoteJid === 'status@broadcast') {
                 if (!mek.key.fromMe) {
