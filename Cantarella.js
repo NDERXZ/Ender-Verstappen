@@ -32318,6 +32318,7 @@ else if (command === 'clearbl' || command === 'clearblacklist') {
 }
 else if (command === 'setmc' || command === 'setmcserver') {
   if (!isOwner && !isCreator && !isAdmins) return reply(mess.admin);
+  try { delete require.cache[require.resolve('./lib/mcStatus')]; } catch {}
   const _mcMod = require('./lib/mcStatus');
   if (!text) {
     const _cur = _mcMod.getMcConfig();
@@ -32407,6 +32408,7 @@ else if (command === 'setmc' || command === 'setmcserver') {
 }
 else if (command === 'mcstatus' || command === 'servermc' || command === 'mc' || command === 'tps') {
   await Cantarella.sendMessage(m.chat, { react: { text: '⚡', key: m.key } });
+  try { delete require.cache[require.resolve('./lib/mcStatus')]; } catch {}
   const _mcMod = require('./lib/mcStatus');
   let _customCfg = null;
   if (text && text.trim()) {
@@ -32440,7 +32442,7 @@ else if (command === 'mcstatus' || command === 'servermc' || command === 'mc' ||
   const _st = await _mcMod.queryFullMcStatus(_cfgToUse);
   const _botFoot = global.namaBot || 'Ender Verstappen';
   const _dispAddr = _cfgToUse.host || _st.host || 'evertalemc.id';
-  const _dispPort = _cfgToUse.port || _st.port || 19005;
+  const _dispPort = _st.port || _cfgToUse.port || 25565;
 
   if (_st.pteroError && !_st.online) {
     Cantarella.sendMessage(m.chat, { react: { text: '❌', key: m.key } });
