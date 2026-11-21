@@ -27854,25 +27854,30 @@ break;
                 }
 
                 if (!resolved || resolved.failed || !resolved.buffer || resolved.buffer.length === 0) {
-                    await Cantarella.sendMessage(m.chat, { react: { text: '❓', key: m.key } });
+                    await Cantarella.sendMessage(m.chat, { react: { text: '❌', key: m.key } });
                     
                     const isQuoted = Boolean(m.quoted || m.msg?.contextInfo?.quotedMessage || resolved?.failed);
-                    if (isQuoted) {
+                    const isVO = Boolean(m.quoted?.isViewOnce || m.quoted?.viewOnce || resolved?.target?.isViewOnce);
+                    if (isQuoted && isVO) {
                         return reply(
-                            `❌ *GAGAL MEMBUKA MEDIA VIEW ONCE*\n\n` +
-                            `> Pesan yang kamu balas terdeteksi sebagai pesan Sekali Lihat (View Once), tetapi server WhatsApp tidak dapat mengunduh media tersebut.\n\n` +
-                            `📌 *Penyebab Umum:*\n` +
-                            `1. Media tersebut dikirim sebelum bot aktif, sehingga kunci dekripsi tidak tersimpan di memori bot.\n` +
-                            `2. Server WhatsApp telah menghapus URL unduhan karena media sudah kedaluwarsa atau sudah dibuka.\n\n` +
-                            `💡 *Cara Mengatasinya:*\n` +
-                            `• Minta pengirim mengirimkan media Sekali Lihat yang **BARU** saat bot sedang online.\n` +
-                            `• Bot akan otomatis menangkap dan menyimpan media tersebut seketika masuk ke obrolan.`
+                            `❌ *TIDAK DAPAT MEMBUKA MEDIA SEKALI LIHAT (VIEW ONCE)*\n\n` +
+                            `> Pesan yang kamu balas adalah media *Sekali Lihat (View Once)*.\n\n` +
+                            `📌 *Penjelasan Teknis:*\n` +
+                            `Server WhatsApp (Meta) telah memperbarui sistem keamanan multi-device secara global. WhatsApp *sama sekali tidak mengirimkan file media maupun kunci dekripsi (mediaKey)* ke perangkat web/bot, melainkan hanya mengirim sinyal kosong berupa:\n` +
+                            `\`<unavailable type="view_once" />\` _(Message absent from node)_\n\n` +
+                            `🔒 *Kesimpulan:*\n` +
+                            `Media Sekali Lihat hanya dikirimkan WhatsApp ke aplikasi resmi di ponsel penerima. Tidak ada bot WhatsApp Web yang dapat membongkar atau mengunduh media Sekali Lihat tersebut.`
+                        );
+                    } else if (isQuoted) {
+                        return reply(
+                            `❌ *GAGAL MENGUNDUH MEDIA*\n\n` +
+                            `> Media pada pesan yang kamu balas tidak dapat diunduh dari server WhatsApp (kunci media tidak tersedia atau sudah kedaluwarsa).`
                         );
                     } else {
                         return reply(
-                            `❓ *TIDAK ADA PESAN VIEW ONCE DITEMUKAN*\n\n` +
-                            `• Balas/reply pesan foto, video, atau VN *Sekali Lihat (View Once)* lalu ketik \`${prefix}rvo\`\n` +
-                            `• Atau cukup ketik \`${prefix}rvo\` langsung di obrolan setelah ada yang mengirim media Sekali Lihat.`
+                            `❓ *CARA MENGGUNAKAN RVO*\n\n` +
+                            `• Balas/reply pesan media (foto/video/audio) lalu ketik \`${prefix}rvo\`\n\n` +
+                            `_Catatan: Media Sekali Lihat (View Once) diblokir langsung oleh server WhatsApp dan tidak dapat diakses oleh bot._`
                         );
                     }
                 }
