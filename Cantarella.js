@@ -20582,12 +20582,20 @@ await Cantarella.sendMessage(m.chat, { text: text || '📢 Pesan untuk semua ang
 break;
 case 'delete':
 case 'del':
+case 'delswgc':
 case 'hapuspesan': {
 if (!m.isGroup) return reply(mess.group);
 if (!isAdmins && !isOwner) return reply(mess.admin);
 if (!m.quoted) return reply('❓ Reply pesan yang ingin dihapus!');
 try {
-  await Cantarella.sendMessage(m.chat, { delete: { remoteJid: m.chat, fromMe: false, id: m.quoted.id, participant: m.quoted.sender } });
+  const _delFromMe = Boolean(m.quoted.fromMe || (m.quoted.key?.fromMe));
+  const _delTarget = {
+    remoteJid: m.chat,
+    fromMe: _delFromMe,
+    id: m.quoted.id,
+    participant: _delFromMe ? undefined : (m.quoted.sender || m.quoted.participant)
+  };
+  await Cantarella.sendMessage(m.chat, { delete: _delTarget });
 } catch(e) { reply('❌ Gagal hapus pesan: ' + e.message); }
 }
 break;
