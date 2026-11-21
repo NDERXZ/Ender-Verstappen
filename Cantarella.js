@@ -27836,6 +27836,16 @@ break;
             case "viewonce": {
                 await Cantarella.sendMessage(m.chat, { react: { text: '⏳', key: m.key } });
 
+                console.log('[RVO EXEC]', {
+                    chat: m.chat,
+                    sender: m.sender,
+                    hasQuoted: Boolean(m.quoted),
+                    quotedId: m.quoted?.id || m.msg?.contextInfo?.stanzaId,
+                    quotedMtype: m.quoted?.mtype,
+                    quotedIsVO: m.quoted?.isViewOnce,
+                    contextInfoKeys: m.msg?.contextInfo ? Object.keys(m.msg.contextInfo) : null
+                });
+
                 let resolved = null;
                 try {
                     resolved = await _voEngine.resolveViewOnce(m, store, Cantarella);
@@ -27843,14 +27853,28 @@ break;
                     console.error('[RVO Engine resolve error]', resErr);
                 }
 
-                if (!resolved || !resolved.buffer || resolved.buffer.length === 0) {
+                if (!resolved || resolved.failed || !resolved.buffer || resolved.buffer.length === 0) {
                     await Cantarella.sendMessage(m.chat, { react: { text: '❓', key: m.key } });
-                    return reply(
-                        `❓ *TIDAK ADA PESAN VIEW ONCE DITEMUKAN*\n\n` +
-                        `• Balas/reply pesan foto, video, atau VN *Sekali Lihat (View Once)* lalu ketik \`${prefix}rvo\`\n` +
-                        `• Atau cukup ketik \`${prefix}rvo\` langsung di grup/chat setelah ada yang mengirim media Sekali Lihat.\n\n` +
-                        `_Catatan: Jika media dikirim sebelum bot aktif, server WhatsApp mungkin telah menghapus kunci media tersebut._`
-                    );
+                    
+                    const isQuoted = Boolean(m.quoted || m.msg?.contextInfo?.quotedMessage || resolved?.failed);
+                    if (isQuoted) {
+                        return reply(
+                            `❌ *GAGAL MEMBUKA MEDIA VIEW ONCE*\n\n` +
+                            `> Pesan yang kamu balas terdeteksi sebagai pesan Sekali Lihat (View Once), tetapi server WhatsApp tidak dapat mengunduh media tersebut.\n\n` +
+                            `📌 *Penyebab Umum:*\n` +
+                            `1. Media tersebut dikirim sebelum bot aktif, sehingga kunci dekripsi tidak tersimpan di memori bot.\n` +
+                            `2. Server WhatsApp telah menghapus URL unduhan karena media sudah kedaluwarsa atau sudah dibuka.\n\n` +
+                            `💡 *Cara Mengatasinya:*\n` +
+                            `• Minta pengirim mengirimkan media Sekali Lihat yang **BARU** saat bot sedang online.\n` +
+                            `• Bot akan otomatis menangkap dan menyimpan media tersebut seketika masuk ke obrolan.`
+                        );
+                    } else {
+                        return reply(
+                            `❓ *TIDAK ADA PESAN VIEW ONCE DITEMUKAN*\n\n` +
+                            `• Balas/reply pesan foto, video, atau VN *Sekali Lihat (View Once)* lalu ketik \`${prefix}rvo\`\n` +
+                            `• Atau cukup ketik \`${prefix}rvo\` langsung di obrolan setelah ada yang mengirim media Sekali Lihat.`
+                        );
+                    }
                 }
 
                 const senderNum = (resolved.sender || '').split('@')[0].split(':')[0];
