@@ -1966,24 +1966,34 @@ Cantarella.sendTextWithMentions = async (jid, text, quoted, options = {}) => Can
         }
     }
     Cantarella.downloadMediaMessage = async (message) => {
-        let target = message.msg || (message.message ? (message.message[message.mtype] || message.message) : message)
-        if (target && target.message) {
-            const innerType = Object.keys(target.message)[0]
-            if (innerType) target = target.message[innerType]
+        let target = message.msg || (message.message ? (message.message[message.mtype] || message.message) : message);
+        while (target && typeof target === 'object') {
+            if (target.imageMessage) target = target.imageMessage;
+            else if (target.videoMessage) target = target.videoMessage;
+            else if (target.audioMessage) target = target.audioMessage;
+            else if (target.stickerMessage) target = target.stickerMessage;
+            else if (target.documentMessage) target = target.documentMessage;
+            else if (target.viewOnceMessage) target = target.viewOnceMessage.message || target.viewOnceMessage;
+            else if (target.viewOnceMessageV2) target = target.viewOnceMessageV2.message || target.viewOnceMessageV2;
+            else if (target.viewOnceMessageV2Extension) target = target.viewOnceMessageV2Extension.message || target.viewOnceMessageV2Extension;
+            else if (target.ephemeralMessage) target = target.ephemeralMessage.message || target.ephemeralMessage;
+            else if (target.message) target = target.message;
+            else break;
         }
-        let mime = (target.msg || target).mimetype || target.mimetype || (message.msg || message).mimetype || ''
-        let rawType = message.mtype || (target.mimetype ? target.mimetype.split('/')[0] : '') || ''
-        let messageType = rawType.replace(/Message/gi, '').toLowerCase()
-        if (messageType.includes('viewonce') || !messageType) {
-            messageType = mime.split('/')[0] || 'image'
+        let mime = (target.msg || target).mimetype || target.mimetype || (message.msg || message).mimetype || '';
+        let rawType = message.mtype || (target.mimetype ? target.mimetype.split('/')[0] : '') || '';
+        let messageType = rawType.replace(/Message/gi, '').toLowerCase();
+        if (messageType.includes('viewonce') || !messageType || messageType === 'message') {
+            messageType = mime ? (mime.split('/')[0] || 'image') : 'image';
         }
-        const stream = await downloadContentFromMessage(target, messageType)
-        let buffer = Buffer.from([])
+        if (messageType === 'voice') messageType = 'audio';
+        const stream = await downloadContentFromMessage(target, messageType);
+        let buffer = Buffer.from([]);
         for await (const chunk of stream) {
-            buffer = Buffer.concat([buffer, chunk])
+            buffer = Buffer.concat([buffer, chunk]);
         }
-        return buffer
-    }
+        return buffer;
+    };
 
     Cantarella.sendImageAsSticker = async (jid, path, quoted, options = {}) => {
         let buff = Buffer.isBuffer(path) ? 
