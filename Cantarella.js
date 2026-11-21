@@ -6757,7 +6757,7 @@ const _ALL_CMDS = [
     'rpg','rpgprofile','rpgstart','rpgclass','inventory','shop','dungeon','craft','jobs',
     'promote','demote','kick','keluarkan','add','invite','setname','setdesc',
     'setpp','setppgc','antilink','antitoxic','antispam','antiimage','antisticker',
-    'antivideo','antidocument','mute','unmute','closegc','opengc',
+    'antivideo','antidocument','antiswgc','mute','unmute','closegc','opengc',
     'welcome','leave','verify','verifikasi','ban','unban','warn','resetwarn',
     'tagall','everyone','listmember','listanggota','infogrup','groupinfo',
     'linkgrup','getlink','revokelink','setdesc','setname','setsubject',
@@ -7531,8 +7531,32 @@ function _recordMissedInteraction(db, targetJid, senderJid, chatJid, type) {
     return;
   }
 
+  const _isSwgc = m.mtype === 'groupStatusMentionMessage' ||
+                  Boolean(m.message?.groupStatusMentionMessage) ||
+                  (m.mtype === 'protocolMessage' && (m.message?.protocolMessage?.type === 25 || m.msg?.type === 25));
+
+  if (_gs.antiswgc && !_isProtected && !m.key?.fromMe && _isSwgc) {
+    if (isBotAdmins) {
+      try { await Cantarella.sendMessage(m.chat, { delete: m.key }); } catch(_){}
+      if (_notifCheck(m.chat, m.sender, 'antiswgc')) {
+        await Cantarella.sendMessage(m.chat, {
+          text: `🚫 *ANTI SWGC (STATUS GRUP)!*\n\n👤 @${m.sender.split('@')[0]}\n\n⛔ Dilarang memberikan / membagikan Status Grup (SWGC) ke grup ini!\n_Hanya Admin, Owner, dan Bot yang diizinkan memberikan SWGC._\n_Pesan status grup telah dihapus otomatis._`,
+          mentions: [m.sender]
+        });
+      }
+    } else {
+      if (_notifCheck(m.chat, m.sender, 'antiswgc')) {
+        await Cantarella.sendMessage(m.chat, {
+          text: `⚠️ *ANTI SWGC TERDETEKSI!*\n\n👤 @${m.sender.split('@')[0]} membagikan Status Grup (SWGC) ke grup ini.\n_Jadikan bot sebagai admin grup agar pesan SWGC dapat dihapus otomatis._`,
+          mentions: [m.sender]
+        });
+      }
+    }
+    return;
+  }
+
   if (_gs.antispam && !_isProtected) {
-    const _ignoredMtypes = ['reactionMessage', 'protocolMessage', 'pollUpdateMessage', 'senderKeyDistributionMessage', 'messageContextInfo'];
+    const _ignoredMtypes = ['reactionMessage', 'protocolMessage', 'pollUpdateMessage', 'senderKeyDistributionMessage', 'messageContextInfo', 'groupStatusMentionMessage'];
     if (m.mtype && _ignoredMtypes.includes(m.mtype)) return;
 
     const _spMsgTs = m.messageTimestamp ? Number(m.messageTimestamp) : null;
@@ -9156,7 +9180,7 @@ if (_SEC && isCmd && !isOwner && !isCreator) {
 if (_SEC && isCmd && m.isGroup) {
     const _AUDITED = ['kick','ban','unban','mute','unmute','promote','demote',
         'warn','resetwarn','addsewa','delsewa','extsewa','antinsfw','antilink',
-        'antitoxic','antispam','antiraid','shadowban','unshadowban','backupgrup',
+        'antitoxic','antispam','antiraid','antiswgc','shadowban','unshadowban','backupgrup',
         'lockdown','firewall','honeypot','killswitch'];
     if (_AUDITED.includes(command)) {
         const _auditTarget = m.mentionedJid?.[0] || m.quoted?.sender || '';
@@ -17295,7 +17319,7 @@ case 'mcat': {
                 ['antiraid'],['antilink'],['antilinkWA'],
                 ['antispam'],['antivortex'],['antiautobot'],
                 ['antiimage'],['antivideo'],['antidocument'],
-                ['antisticker'],['antiforward'],
+                ['antisticker'],['antiforward'],['antiswgc'],
                 ['warn'],['setwarn','maxwarn'],['listwarn'],['resetwarn'],
                 ['shadowban','sban'],['unshadowban'],['listshadowban'],
                 ['captcha'],['inviteguard'],
@@ -28635,11 +28659,19 @@ case 'swgroup':
 case 'statusgrup':
 case 'statusgroup':
 case 'upswgc': {
-    if (!isOwner && !isCreator) return reply(mess.owner);
+    if (!isOwner && !isCreator) {
+        if (!m.isGroup || !isAdmins) {
+            return reply('❌ Fitur ini hanya dapat digunakan oleh Owner bot atau Admin di grup ini!');
+        }
+    }
 
     Cantarella.sendMessage(m.chat, { react: { text: '⏳', key: m.key } });
 
     const _isAll = (args[0] || '').toLowerCase() === 'all';
+    if (_isAll && !isOwner && !isCreator) {
+        Cantarella.sendMessage(m.chat, { react: { text: '❌', key: m.key } });
+        return reply('❌ Perintah swgc all hanya dapat digunakan oleh Owner bot!');
+    }
     const _swCaption = _isAll ? args.slice(1).join(' ').trim() : (text || '').trim();
 
     let _swBuf = null;
@@ -28800,6 +28832,10 @@ case 'upswgc': {
     // 3. Jika di PC (Private Chat) dan menyebut ID grup (misal: 120363xxx@g.us)
     const _targetGid = (args[0] || '').endsWith('@g.us') ? args[0] : null;
     if (_targetGid) {
+        if (!isOwner && !isCreator) {
+            Cantarella.sendMessage(m.chat, { react: { text: '❌', key: m.key } });
+            return reply('❌ Mengirim SWGC ke grup lain hanya dapat digunakan oleh Owner bot!');
+        }
         if (_swContent.type === 'image' || _swContent.type === 'video') {
             _swContent.caption = args.slice(1).join(' ').trim();
         } else if (_swContent.type === 'text') {
@@ -28822,6 +28858,10 @@ case 'upswgc': {
     }
 
     // 4. Jika di PC tanpa parameter grup, siapkan session dan menu pemilihan grup
+    if (!isOwner && !isCreator) {
+        Cantarella.sendMessage(m.chat, { react: { text: '❌', key: m.key } });
+        return reply('❌ Fitur SWGC di private chat hanya dapat digunakan oleh Owner bot!');
+    }
     let _swAllGroups;
     try {
         const _swFetch = await Cantarella.groupFetchAllParticipating();
@@ -31885,6 +31925,47 @@ else if (command === 'antisticker') {
   else if (_as === 'off') { gsKey(m.chat, 'antisticker', false); _notifResetGroup(m.chat, 'antisticker'); reply('❌ *Anti-Stiker dinonaktifkan!*'); }
   else reply(`ℹ️ *Anti-Stiker*\n• *${prefix}antisticker on*\n• *${prefix}antisticker off*`);
 }
+else if (command === 'antiswgc') {
+  if (!m.isGroup) return reply(mess.group);
+  if (!isAdmins && !isOwner) return reply(mess.admin);
+  const _swgcAct = (text||'').toLowerCase().trim();
+  if (_swgcAct === 'on') {
+    gsKey(m.chat, 'antiswgc', true);
+    reply(
+      `✅ *Anti-SWGC diaktifkan untuk grup ini!*\n\n` +
+      `🛡️ *Status:* ✅ Aktif\n` +
+      `📢 Member biasa dilarang memberikan / membagikan Status Grup (SWGC) ke grup ini.\n` +
+      `👑 Hanya *Admin*, *Owner*, dan *Bot* yang diizinkan memberikan SWGC.\n\n` +
+      `_Pesan SWGC dari member biasa akan otomatis dihapus jika bot adalah admin._`
+    );
+  } else if (_swgcAct === 'off') {
+    gsKey(m.chat, 'antiswgc', false);
+    _notifResetGroup(m.chat, 'antiswgc');
+    reply('❌ *Anti-SWGC dinonaktifkan!*\nSemua member kini dapat memberikan Status Grup (SWGC).');
+  } else {
+    const _swgcData = gsGet(m.chat);
+    const _swgcOn = _swgcData.antiswgc;
+    const _swgcBtns = [
+      { buttonId: `${prefix}antiswgc on`,  buttonText: { displayText: _swgcOn ? '✅ ON (aktif)' : '⭕ Aktifkan Anti-SWGC' }, type: 1 },
+      { buttonId: `${prefix}antiswgc off`, buttonText: { displayText: _swgcOn ? '⭕ Matikan Anti-SWGC' : '✅ OFF (nonaktif)' }, type: 1 }
+    ];
+    await Cantarella.sendMessage(m.chat, {
+      text: (
+        `📢 *ANTI SWGC SYSTEM*\n\n` +
+        `📊 *Status:* ${_swgcOn ? '✅ Aktif' : '❌ Nonaktif'}\n\n` +
+        `*Deskripsi:*\n` +
+        `Mencegah member biasa memberikan atau mengirim Status Grup (SWGC) ke grup ini.\n` +
+        `Hanya *Admin*, *Owner*, dan *Bot* yang memiliki izin memberikan SWGC.\n\n` +
+        `*Perintah:*\n` +
+        `• \`${prefix}antiswgc on\` — Aktifkan Anti-SWGC\n` +
+        `• \`${prefix}antiswgc off\` — Matikan Anti-SWGC`
+      ),
+      footer: `${global.namaBot} • Anti SWGC`,
+      buttons: _swgcBtns,
+      headerType: 1
+    }, { quoted: fakeQuoted });
+  }
+}
 
 else if (command === 'security' || command === 'grupstatus' || command === 'groupstatus' || command === 'panel') {
   if (!m.isGroup) return reply(mess.group);
@@ -31898,11 +31979,12 @@ else if (command === 'security' || command === 'grupstatus' || command === 'grou
           { title: `Anti-Link: ${_spData.antilink?'✅ ON':'❌ OFF'}`,     description: 'Tap untuk toggle', id: `${prefix}antilink ${_spData.antilink?'off':'on'}`       },
           { title: `Anti WA-Link: ${_spData.antilinkWA?'✅ ON':'❌ OFF'}`, description: 'Tap untuk toggle', id: `${prefix}antilinkwa ${_spData.antilinkWA?'off':'on'}`   }
         ]},
-        { title: '🖼️ Anti-Media', rows: [
+        { title: '🖼️ Anti-Media & SWGC', rows: [
           { title: `Anti-Gambar: ${_spData.antiimage?'✅':'❌'}`,    description: 'Tap untuk toggle', id: `${prefix}antiimage ${_spData.antiimage?'off':'on'}`         },
           { title: `Anti-Video: ${_spData.antivideo?'✅':'❌'}`,     description: 'Tap untuk toggle', id: `${prefix}antivideo ${_spData.antivideo?'off':'on'}`         },
           { title: `Anti-Dokumen: ${_spData.antidocument?'✅':'❌'}`, description: 'Tap untuk toggle', id: `${prefix}antidocument ${_spData.antidocument?'off':'on'}` },
-          { title: `Anti-Stiker: ${_spData.antisticker?'✅':'❌'}`,  description: 'Tap untuk toggle', id: `${prefix}antisticker ${_spData.antisticker?'off':'on'}`     }
+          { title: `Anti-Stiker: ${_spData.antisticker?'✅':'❌'}`,  description: 'Tap untuk toggle', id: `${prefix}antisticker ${_spData.antisticker?'off':'on'}`     },
+          { title: `Anti-SWGC: ${_spData.antiswgc?'✅':'❌'}`,    description: 'Tap untuk toggle', id: `${prefix}antiswgc ${_spData.antiswgc?'off':'on'}`         }
         ]},
         { title: '☣️ Anti-Toxic', rows: [
           { title: `Anti-Toxic: ${_spData.antitoxic?'✅ ON':'❌ OFF'}`, description: `Max warn: ${_spData.maxWarn||3}x`, id: `${prefix}antitoxic ${_spData.antitoxic?'off':'on'}` }
@@ -31915,7 +31997,7 @@ else if (command === 'security' || command === 'grupstatus' || command === 'grou
     })}
   }];
   await Cantarella.sendMessage(m.chat, {
-    text: `🛡️ *GROUP SECURITY PANEL*\n\n*📋 Status Semua Fitur:*\n\n🔗 Anti-Link      : ${_spData.antilink?'✅ ON':'❌ OFF'}\n🔗 Anti WA-Link   : ${_spData.antilinkWA?'✅ ON':'❌ OFF'}\n🖼️ Anti-Gambar    : ${_spData.antiimage?'✅ ON':'❌ OFF'}\n🎥 Anti-Video     : ${_spData.antivideo?'✅ ON':'❌ OFF'}\n📄 Anti-Dokumen   : ${_spData.antidocument?'✅ ON':'❌ OFF'}\n😄 Anti-Stiker    : ${_spData.antisticker?'✅ ON':'❌ OFF'}\n☣️ Anti-Toxic     : ${_spData.antitoxic?'✅ ON':'❌ OFF'} (Max: ${_spData.maxWarn||3}x)\n🚫 Anti-Spam      : ${_spData.antispam?'✅ ON':'❌ OFF'} (Max: ${_spData.spamMax||50}x/10dtk)\n🦠 Anti-Vortex    : ${_spData.antivortex?'✅ ON':'❌ OFF'}\n👋 Welcome        : ${_spData.welcome?'✅ ON':'❌ OFF'}\n👋 Goodbye        : ${_spData.leave?'✅ ON':'❌ OFF'}\n\n_Tap tombol untuk mengubah pengaturan._`,
+    text: `🛡️ *GROUP SECURITY PANEL*\n\n*📋 Status Semua Fitur:*\n\n🔗 Anti-Link      : ${_spData.antilink?'✅ ON':'❌ OFF'}\n🔗 Anti WA-Link   : ${_spData.antilinkWA?'✅ ON':'❌ OFF'}\n🖼️ Anti-Gambar    : ${_spData.antiimage?'✅ ON':'❌ OFF'}\n🎥 Anti-Video     : ${_spData.antivideo?'✅ ON':'❌ OFF'}\n📄 Anti-Dokumen   : ${_spData.antidocument?'✅ ON':'❌ OFF'}\n😄 Anti-Stiker    : ${_spData.antisticker?'✅ ON':'❌ OFF'}\n📢 Anti-SWGC      : ${_spData.antiswgc?'✅ ON':'❌ OFF'}\n☣️ Anti-Toxic     : ${_spData.antitoxic?'✅ ON':'❌ OFF'} (Max: ${_spData.maxWarn||3}x)\n🚫 Anti-Spam      : ${_spData.antispam?'✅ ON':'❌ OFF'} (Max: ${_spData.spamMax||50}x/10dtk)\n🦠 Anti-Vortex    : ${_spData.antivortex?'✅ ON':'❌ OFF'}\n👋 Welcome        : ${_spData.welcome?'✅ ON':'❌ OFF'}\n👋 Goodbye        : ${_spData.leave?'✅ ON':'❌ OFF'}\n\n_Tap tombol untuk mengubah pengaturan._`,
     footer: `${global.namaBot} • Group Manager`,
     buttons: _spNF, headerType: 1
   }, { quoted: fakeQuoted });
