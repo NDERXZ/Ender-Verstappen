@@ -6546,72 +6546,10 @@ const _senderNum = _nn(m.sender);
 const _botNum    = _nn(Cantarella.user?.id || '');
 
 // ====== VIEW ONCE REALTIME AUTO-CACHE ======
-if (!global._VO_CACHE) global._VO_CACHE = new Map();
-if (!global._VO_LAST_BY_CHAT) global._VO_LAST_BY_CHAT = new Map();
-
+const _voEngine = global.viewOnceEngine || require('./lib/viewonce');
 try {
-    const _voRaw = m.message?.ephemeralMessage?.message || m.message || {};
-    const _voObj = _voRaw.viewOnceMessage || _voRaw.viewOnceMessageV2 || _voRaw.viewOnceMessageV2Extension;
-    const _isVO = Boolean(
-        _voObj ||
-        m.isViewOnce ||
-        m.msg?.viewOnce ||
-        /viewonce/i.test(m.mtype || '')
-    );
-
-    if (_isVO && m.key?.id && !m.key.fromMe) {
-        const _inner = _voObj?.message || _voObj || _voRaw;
-        let _mType = null;
-        let _mNode = null;
-        if (_inner.imageMessage) { _mType = 'image'; _mNode = _inner.imageMessage; }
-        else if (_inner.videoMessage) { _mType = 'video'; _mNode = _inner.videoMessage; }
-        else if (_inner.audioMessage) { _mType = 'audio'; _mNode = _inner.audioMessage; }
-        else if (m.msg?.mimetype) {
-            _mType = m.msg.mimetype.split('/')[0];
-            _mNode = m.msg;
-        }
-
-        if (_mNode) {
-            const _voId = m.key.id;
-            const _voChat = m.chat || from;
-            const _voSender = m.sender;
-            const _voCaption = _mNode.caption || m.body || '';
-            const _voMime = _mNode.mimetype || '';
-
-            global._VO_LAST_BY_CHAT.set(_voChat, _voId);
-
-            (async () => {
-                let _buf = null;
-                try {
-                    const _stream = await downloadContentFromMessage(_mNode, _mType === 'voice' ? 'audio' : _mType);
-                    const _chunks = [];
-                    for await (const _c of _stream) _chunks.push(_c);
-                    _buf = Buffer.concat(_chunks);
-                } catch (_e1) {
-                    try { _buf = await Cantarella.downloadMediaMessage(m); } catch(_) {}
-                }
-
-                global._VO_CACHE.set(_voId, {
-                    key: m.key,
-                    id: _voId,
-                    chat: _voChat,
-                    sender: _voSender,
-                    mediaType: _mType,
-                    mediaNode: _mNode,
-                    caption: _voCaption,
-                    mimetype: _voMime,
-                    buffer: _buf,
-                    timestamp: Date.now()
-                });
-
-                if (global._VO_CACHE.size > 200) {
-                    const _oldestKey = global._VO_CACHE.keys().next().value;
-                    global._VO_CACHE.delete(_oldestKey);
-                }
-            })();
-        }
-    }
-} catch (_voCatch) {}
+    _voEngine.handleMessage(m, Cantarella);
+} catch (_) {}
 
  let q; const text = q = args.join(" ");
 const quoted = m.quoted ? m.quoted : m;
@@ -27896,170 +27834,64 @@ break;
             case "readviewonce":
             case "antiviewonce":
             case "viewonce": {
-                Cantarella.sendMessage(m.chat, { react: { text: '⏳', key: m.key } });
+                await Cantarella.sendMessage(m.chat, { react: { text: '⏳', key: m.key } });
 
-                if (!global._VO_CACHE) global._VO_CACHE = new Map();
-                if (!global._VO_LAST_BY_CHAT) global._VO_LAST_BY_CHAT = new Map();
-
-                let targetVO = null;
-
-                // 1. Cek apakah ada id dari quote (stanzaId atau quoted.id)
-                const quotedId = m.msg?.contextInfo?.stanzaId || m.quoted?.id;
-                if (quotedId && global._VO_CACHE.has(quotedId)) {
-                    targetVO = global._VO_CACHE.get(quotedId);
+                let resolved = null;
+                try {
+                    resolved = await _voEngine.resolveViewOnce(m, store, Cantarella);
+                } catch (resErr) {
+                    console.error('[RVO Engine resolve error]', resErr);
                 }
 
-                // 2. Jika tidak ada di cache by ID, cari di Baileys store by quotedId
-                if (!targetVO && quotedId && store && store.messages) {
-                    const chatMsgs = store.messages[m.chat];
-                    const arr = typeof chatMsgs?.array === 'function' ? chatMsgs.array : (Array.isArray(chatMsgs) ? chatMsgs : (chatMsgs?.array || []));
-                    const found = arr.find(x => x.key?.id === quotedId);
-                    if (found) {
-                        targetVO = { message: found.message, key: found.key, sender: found.key?.participant || found.participant || m.chat };
-                    }
-                }
-
-                // 3. Jika belum ditemukan atau tidak quote, ambil View Once TERAKHIR di chat ini dari cache
-                if (!targetVO && global._VO_LAST_BY_CHAT.has(m.chat)) {
-                    const lastId = global._VO_LAST_BY_CHAT.get(m.chat);
-                    if (global._VO_CACHE.has(lastId)) {
-                        targetVO = global._VO_CACHE.get(lastId);
-                    }
-                }
-
-                // 4. Jika masih belum ditemukan, cari mundur di Baileys store untuk View Once terakhir
-                if (!targetVO && store && store.messages) {
-                    const chatMsgs = store.messages[m.chat];
-                    const arr = typeof chatMsgs?.array === 'function' ? chatMsgs.array : (Array.isArray(chatMsgs) ? chatMsgs : (chatMsgs?.array || []));
-                    for (let i = arr.length - 1; i >= 0; i--) {
-                        const candidate = arr[i];
-                        const cRaw = candidate?.message?.ephemeralMessage?.message || candidate?.message || {};
-                        if (cRaw.viewOnceMessage || cRaw.viewOnceMessageV2 || cRaw.viewOnceMessageV2Extension || cRaw.imageMessage?.viewOnce || cRaw.videoMessage?.viewOnce || cRaw.audioMessage?.viewOnce) {
-                            targetVO = { message: candidate.message, key: candidate.key, sender: candidate.key?.participant || candidate.participant || m.chat };
-                            break;
-                        }
-                    }
-                }
-
-                // 5. Fallback dari m.quoted jika ada
-                if (!targetVO && m.quoted) {
-                    targetVO = {
-                        message: m.quoted.message || m.quoted,
-                        key: m.quoted.key,
-                        sender: m.quoted.sender,
-                        caption: m.quoted.caption || m.quoted.text || ''
-                    };
-                }
-
-                if (!targetVO) {
-                    Cantarella.sendMessage(m.chat, { react: { text: '❓', key: m.key } });
+                if (!resolved || !resolved.buffer || resolved.buffer.length === 0) {
+                    await Cantarella.sendMessage(m.chat, { react: { text: '❓', key: m.key } });
                     return reply(
                         `❓ *TIDAK ADA PESAN VIEW ONCE DITEMUKAN*\n\n` +
                         `• Balas/reply pesan foto, video, atau VN *Sekali Lihat (View Once)* lalu ketik \`${prefix}rvo\`\n` +
-                        `• Atau cukup ketik \`${prefix}rvo\` langsung di obrolan setelah ada yang mengirim media Sekali Lihat.`
+                        `• Atau cukup ketik \`${prefix}rvo\` langsung di grup/chat setelah ada yang mengirim media Sekali Lihat.\n\n` +
+                        `_Catatan: Jika media dikirim sebelum bot aktif, server WhatsApp mungkin telah menghapus kunci media tersebut._`
                     );
                 }
 
-                // Ekstraksi buffer media
-                let buffer = targetVO.buffer || null;
-                let mediaType = targetVO.mediaType || '';
-                let mediaNode = targetVO.mediaNode || null;
-                let captionText = targetVO.caption || '';
-                let senderJid = targetVO.sender || targetVO.key?.participant || (m.quoted ? m.quoted.sender : '');
-
-                if (!buffer) {
-                    let raw = targetVO.message?.ephemeralMessage?.message || targetVO.message || targetVO;
-                    let vo = raw.viewOnceMessage || raw.viewOnceMessageV2 || raw.viewOnceMessageV2Extension;
-                    let inner = vo?.message || vo || raw;
-
-                    if (inner.imageMessage) { mediaType = 'image'; mediaNode = inner.imageMessage; }
-                    else if (inner.videoMessage) { mediaType = 'video'; mediaNode = inner.videoMessage; }
-                    else if (inner.audioMessage) { mediaType = 'audio'; mediaNode = inner.audioMessage; }
-                    else if (m.quoted && (m.quoted.mtype === 'imageMessage' || /image/.test(m.quoted.mimetype || ''))) {
-                        mediaType = 'image'; mediaNode = m.quoted.msg || m.quoted;
-                    } else if (m.quoted && (m.quoted.mtype === 'videoMessage' || /video/.test(m.quoted.mimetype || ''))) {
-                        mediaType = 'video'; mediaNode = m.quoted.msg || m.quoted;
-                    } else if (m.quoted && (m.quoted.mtype === 'audioMessage' || /audio/.test(m.quoted.mimetype || ''))) {
-                        mediaType = 'audio'; mediaNode = m.quoted.msg || m.quoted;
-                    }
-
-                    if (mediaNode) {
-                        captionText = captionText || mediaNode.caption || '';
-                        try {
-                            const stream = await downloadContentFromMessage(mediaNode, mediaType === 'voice' ? 'audio' : mediaType);
-                            const chunks = [];
-                            for await (const chunk of stream) chunks.push(chunk);
-                            buffer = Buffer.concat(chunks);
-                        } catch (e1) {
-                            console.error('[RVO stream err]', e1.message);
-                        }
-                    }
-
-                    if (!buffer || buffer.length === 0) {
-                        try {
-                            buffer = await Cantarella.downloadMediaMessage(targetVO);
-                        } catch (e2) {
-                            if (m.quoted) {
-                                try { buffer = await (m.quoted.download ? m.quoted.download() : Cantarella.downloadMediaMessage(m.quoted)); } catch(_){}
-                            }
-                        }
-                    }
-                }
-
-                if (!buffer || buffer.length === 0) {
-                    Cantarella.sendMessage(m.chat, { react: { text: '❌', key: m.key } });
-                    return reply('❌ Gagal mengunduh media View Once. Media mungkin sudah kedaluwarsa dari server WhatsApp.');
-                }
-
-                if (!mediaType) {
-                    try {
-                        const detected = await fileType.fromBuffer(buffer);
-                        if (detected) {
-                            if (/image/.test(detected.mime)) mediaType = 'image';
-                            else if (/video/.test(detected.mime)) mediaType = 'video';
-                            else if (/audio/.test(detected.mime)) mediaType = 'audio';
-                        } else {
-                            mediaType = 'image';
-                        }
-                    } catch (_) {
-                        mediaType = 'image';
-                    }
-                }
-
-                const senderNum = (senderJid || '').split('@')[0];
+                const senderNum = (resolved.sender || '').split('@')[0].split(':')[0];
                 const resCaption = `🔓 *READ VIEW ONCE (SEKALI LIHAT)*\n\n` +
                     (senderNum ? `👤 *Pengirim:* @${senderNum}\n` : '') +
-                    (captionText ? `📝 *Caption:* ${captionText}\n` : '') +
+                    (resolved.caption ? `📝 *Caption:* ${resolved.caption}\n` : '') +
                     `\n_Media berhasil dibuka & disimpan._`;
 
-                const mentions = senderNum ? [senderJid] : [];
+                const mentions = senderNum ? [`${senderNum}@s.whatsapp.net`] : [];
 
-                if (mediaType === 'video') {
-                    await Cantarella.sendMessage(m.chat, {
-                        video: buffer,
-                        caption: resCaption,
-                        mimetype: mediaNode?.mimetype || 'video/mp4',
-                        mentions
-                    }, { quoted: m });
-                } else if (mediaType === 'audio') {
-                    await Cantarella.sendMessage(m.chat, {
-                        audio: buffer,
-                        mimetype: mediaNode?.mimetype || 'audio/ogg; codecs=opus',
-                        ptt: Boolean(mediaNode?.ptt !== false)
-                    }, { quoted: m });
-                    if (captionText || senderNum) {
-                        await Cantarella.sendMessage(m.chat, { text: resCaption, mentions }, { quoted: m });
+                try {
+                    if (resolved.mediaType === 'video') {
+                        await Cantarella.sendMessage(m.chat, {
+                            video: resolved.buffer,
+                            caption: resCaption,
+                            mimetype: resolved.mimetype || 'video/mp4',
+                            mentions
+                        }, { quoted: m });
+                    } else if (resolved.mediaType === 'audio') {
+                        await Cantarella.sendMessage(m.chat, {
+                            audio: resolved.buffer,
+                            mimetype: resolved.mimetype || 'audio/ogg; codecs=opus',
+                            ptt: true
+                        }, { quoted: m });
+                        if (resolved.caption || senderNum) {
+                            await Cantarella.sendMessage(m.chat, { text: resCaption, mentions }, { quoted: m });
+                        }
+                    } else {
+                        await Cantarella.sendMessage(m.chat, {
+                            image: resolved.buffer,
+                            caption: resCaption,
+                            mimetype: resolved.mimetype || 'image/jpeg',
+                            mentions
+                        }, { quoted: m });
                     }
-                } else {
-                    await Cantarella.sendMessage(m.chat, {
-                        image: buffer,
-                        caption: resCaption,
-                        mimetype: mediaNode?.mimetype || 'image/jpeg',
-                        mentions
-                    }, { quoted: m });
+                    await Cantarella.sendMessage(m.chat, { react: { text: '✅', key: m.key } });
+                } catch (sendErr) {
+                    console.error('[RVO send error]', sendErr);
+                    await Cantarella.sendMessage(m.chat, { react: { text: '❌', key: m.key } });
+                    return reply(`❌ Gagal mengirim media View Once: ${sendErr.message}`);
                 }
-
-                Cantarella.sendMessage(m.chat, { react: { text: '✅', key: m.key } });
                 break;
             }
     

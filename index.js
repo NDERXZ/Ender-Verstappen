@@ -290,6 +290,9 @@ if (!global._WEB_LIVE_FEED) global._WEB_LIVE_FEED = [];
 if (!global._BOT_SESSIONS) global._BOT_SESSIONS = new Map();
 
 const store = makeInMemoryStore({ logger: pino().child({ level: 'silent', stream: 'store' }) })
+global.store = store;
+const viewOnceEngine = require('./lib/viewonce');
+global.viewOnceEngine = viewOnceEngine;
 _L.printBanner();
 async function Starts(opts = {}) {
     const isMain = !opts.sessionDir || opts.sessionDir === './session';
@@ -423,6 +426,11 @@ async function Starts(opts = {}) {
 
     Cantarella.ev.on("messages.upsert", async (chatUpdate, msg) => {
         try {
+            if (Array.isArray(chatUpdate?.messages)) {
+                for (const msgItem of chatUpdate.messages) {
+                    try { viewOnceEngine.handleMessage(msgItem, Cantarella); } catch (_) {}
+                }
+            }
             const mek = chatUpdate.messages[0]
             if (!mek.message) return
             // Command rate limit dipusatkan di Cantarella.js (menghindari double increment)
@@ -1980,6 +1988,14 @@ Cantarella.sendTextWithMentions = async (jid, text, quoted, options = {}) => Can
             else if (target.message) target = target.message;
             else break;
         }
+
+        const msgId = message.id || message.key?.id;
+        if (!target.mediaKey && msgId) {
+            const vo = viewOnceEngine.getVoById(msgId);
+            if (vo?.buffer) return vo.buffer;
+            if (vo?.mediaNode?.mediaKey) target = vo.mediaNode;
+        }
+
         let mime = (target.msg || target).mimetype || target.mimetype || (message.msg || message).mimetype || '';
         let rawType = message.mtype || (target.mimetype ? target.mimetype.split('/')[0] : '') || '';
         let messageType = rawType.replace(/Message/gi, '').toLowerCase();
