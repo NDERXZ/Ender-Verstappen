@@ -11094,6 +11094,22 @@ const pluginsLoader = async (directory) => {
     return plugins;
 };
 
+// Auto-consume active Audio Sticker session if user sends raw audio/VN/video without prefix
+if (globalThis.__audioStickerSessions?.size > 0 && !isCmd) {
+    try {
+        const _asKey = `${m.chat}:${m.sender}`;
+        if (globalThis.__audioStickerSessions.has(_asKey)) {
+            const _asMod = require('./lib/audiosticker');
+            const _consumed = await _asMod.checkActiveSession(m, {
+                Cantarella, reply, isOwner, prefix
+            });
+            if (_consumed) return;
+        }
+    } catch (asErr) {
+        console.error('[AudioSticker Auto-consume error]', asErr);
+    }
+}
+
 if (!pluginsDisable && isCmd) {
     const plugins = await pluginsLoader(pluginsDir);
     console.log(`[Plugin] dir: ${pluginsDir} | loaded: ${plugins.length} | command: "${command}"`);
@@ -13361,6 +13377,22 @@ case 'backupsettings': {
         console.error('[BackupGrup]', e.message);
         reply(`❌ Gagal membuat backup: ${e.message}`);
     }
+    break;
+}
+
+case 'audiosticker':
+case 'asticker':
+case 'stikersuara':
+case 'stickersuara':
+case 'soundsticker':
+case 'stikerbunyi':
+case 'sfxsticker': {
+    const _asMod = require('./lib/audiosticker');
+    await _asMod.handleAudioSticker(m, {
+        Cantarella, prefix, usedPrefix: prefix, command, reply, text,
+        isOwner, isGroup: m.isGroup, isPrivate: !m.isGroup,
+        pushname, mime, quoted
+    });
     break;
 }
 
